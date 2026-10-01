@@ -1,0 +1,19 @@
+# Compile la version Windows à chaque modification (sans publier).
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["windows/**", ".github/workflows/windows-ci.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build
+        run: dotnet build windows/Parker/Parker.csproj -c Release -nologo -clp:NoSummary

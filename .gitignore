@@ -38,3 +38,8 @@ dist/
 *.p12
 Parker-signature/
 .DS_Store
+
+# Windows build output
+windows/**/bin/
+windows/**/obj/
+out/

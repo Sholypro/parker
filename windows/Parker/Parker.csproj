@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>Parker</AssemblyName>
+    <RootNamespace>Parker</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Parker.ico</ApplicationIcon>
+    <Version>1.7.0</Version>
+    <Product>Parker</Product>
+    <Company>Sholy Design</Company>
+    <Description>Capture d'écran, capture défilante et annotation</Description>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>fr</SatelliteResourceLanguages>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ForceDesignerDpiUnaware>true</ForceDesignerDpiUnaware>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\Parker.ico" LogicalName="Parker.ico" />
+    <EmbeddedResource Include="Assets\Tray.ico" LogicalName="Tray.ico" />
+  </ItemGroup>
+</Project>

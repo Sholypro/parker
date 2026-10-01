@@ -16,6 +16,9 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      skip: ${{ steps.version.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,3 +81,31 @@ jobs:
           name: Parker ${{ steps.version.outputs.version }}
           files: Parker.zip
           generate_release_notes: true
+
+  windows:
+    needs: build
+    if: needs.build.outputs.skip != 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build Parker.exe
+        shell: pwsh
+        run: |
+          $v = "${{ needs.build.outputs.version }}"
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { $v = "$v.0" }
+          dotnet publish windows/Parker/Parker.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
+            -p:Version=$v -o out
+          Compress-Archive -Path out/Parker.exe -DestinationPath Parker-Windows.zip
+          Get-Item Parker-Windows.zip | Select-Object Name, Length
+
+      - name: Ajouter à la release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build.outputs.version }}
+          files: Parker-Windows.zip

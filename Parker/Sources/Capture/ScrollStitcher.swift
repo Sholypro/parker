@@ -27,6 +27,7 @@ final class ScrollStitcher {
     private var refFrame: CGImage?
     private var refGray: [Int32] = []
     private var refBandBottom = 0
+    private var lastFooter = Int.max
     private var started = false
     private var slices: [CGImage] = []
     private var footerImage: CGImage?
@@ -44,6 +45,7 @@ final class ScrollStitcher {
         refGray = []
         refBandBottom = 0
         started = false
+        lastFooter = Int.max
         slices.removeAll()
         footerImage = nil
     }
@@ -79,6 +81,9 @@ final class ScrollStitcher {
         while header < h / 3 && same[header] { header += 1 }
         var footer = 0
         while footer < h / 4 && same[h - 1 - footer] { footer += 1 }
+        // The sticky footer can only shrink: blank content rows above a footer look "unchanged"
+        // on small scrolls, and letting the footer grow would duplicate those rows.
+        if started { footer = min(footer, lastFooter) }
 
         let band = h - header - footer
         guard band >= 40 else { return .noMatch }
@@ -158,6 +163,7 @@ final class ScrollStitcher {
         refFrame = frame
         refGray = gray
         refBandBottom = end
+        lastFooter = footer
         return .appended(best)
     }
 
