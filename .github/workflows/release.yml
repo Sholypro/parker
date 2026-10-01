@@ -1,15 +1,14 @@
-# Publie une nouvelle version quand un tag "v1.2" (etc.) est poussé.
-# Résultat : une Release GitHub avec Parker.zip, que l'app des collègues détecte toute seule.
+# Publie une nouvelle version de Parker.
+# Déclencheur : un push sur main qui change le numéro de version dans Parker/Support/Info.plist
+# (ou un lancement manuel depuis l'onglet Actions).
+# Résultat : une Release GitHub avec Parker.zip, que l'app de chacun détecte toute seule.
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["Parker/Support/Info.plist", ".github/workflows/release.yml"]
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Numéro de version (ex. 1.2)"
-        required: true
 
 permissions:
   contents: write
@@ -22,12 +21,21 @@ jobs:
 
       - name: Version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then V="${{ github.event.inputs.version }}"; else V="${GITHUB_REF_NAME#v}"; fi
+          V="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Parker/Support/Info.plist)"
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "Version : $V"
+          if gh release view "v$V" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "La version $V est déjà publiée : rien à faire."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nouvelle version : $V"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Certificat de signature (optionnel)
+        if: steps.version.outputs.skip != 'true'
         id: sign
         env:
           P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
@@ -51,6 +59,7 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
 
       - name: Build
+        if: steps.version.outputs.skip != 'true'
         env:
           SC_VERSION: ${{ steps.version.outputs.version }}
           SC_SIGN_IDENTITY: ${{ steps.sign.outputs.identity }}
@@ -61,9 +70,11 @@ jobs:
           codesign -dv dist/Parker.app 2>&1 | grep -E "Authority|Signature" || true
 
       - name: Publier la release
+        if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           name: Parker ${{ steps.version.outputs.version }}
           files: Parker.zip
           generate_release_notes: true
