@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>LSUIElement</key>
+    <true/>
+    <key>CFBundleName</key>
+    <string>Parker</string>
+    <key>CFBundleDisplayName</key>
+    <string>Parker</string>
+    <key>CFBundleExecutable</key>
+    <string>Parker</string>
+    <key>CFBundleIdentifier</key>
+    <string>fr.sholy.parker</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1.1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>fr</string>
+    <key>PKUpdateRepository</key>
+    <string>Sholypro/parker</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Parker a besoin de l'enregistrement de l'écran pour faire des captures.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Parker a besoin du micro pour enregistrer le son avec tes vidéos d'écran.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Parker a besoin de l'accessibilité pour les raccourcis globaux et l'auto-scroll de la capture défilante.</string>
+</dict>
+</plist>
