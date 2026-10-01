@@ -11,7 +11,7 @@ class AboutWindowController {
             .foregroundColor: NSColor.secondaryLabelColor
         ]
         credits.append(NSAttributedString(
-            string: "The free, open-source screenshot\nand screen recording app for macOS.\n\n",
+            string: "Capture, annotation et capture défilante pour macOS.\nBasé sur ScreenCap (open source, licence MIT).\n\n",
             attributes: descAttrs
         ))
 
@@ -20,12 +20,13 @@ class AboutWindowController {
             .foregroundColor: NSColor.tertiaryLabelColor
         ]
         let features = [
-            "Screenshots & Area Capture",
-            "Screen Recording & GIF Export",
-            "Annotation Editor",
-            "Background Tool",
-            "OCR Text Recognition",
-            "Color Picker"
+            "Capture d'écran et de zone",
+            "Capture défilante",
+            "Annotation",
+            "Vidéo et GIF",
+            "Fonds et mise en valeur",
+            "OCR",
+            "Pipette couleur"
         ]
         credits.append(NSAttributedString(
             string: features.joined(separator: " · "),
@@ -40,8 +41,8 @@ class AboutWindowController {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Parker",
-            .applicationVersion: "1.0",
-            .version: "1",
+            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?",
+            .version: "",
             .credits: credits,
         ])
     }
