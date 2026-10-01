@@ -10,6 +10,13 @@ class ColorPickerTool {
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
 
+        // Capture the screen once (before our overlay appears) and sample from it
+        let snapshot = ScreenGrabber.snapshot(displayContaining: CGPoint(x: mouse.x, y: NSScreen.primaryHeight - mouse.y))
+        if snapshot == nil {
+            ScreenGrabber.reportFailureIfNeeded()
+            return
+        }
+
         let window = NSWindow(
             contentRect: screen.frame,
             styleMask: .borderless,
@@ -23,7 +30,7 @@ class ColorPickerTool {
         window.ignoresMouseEvents = false
         window.acceptsMouseMovedEvents = true
 
-        let view = ColorPickerView(frame: screen.frame) { [weak self] color in
+        let view = ColorPickerView(frame: screen.frame, snapshot: snapshot) { [weak self] color in
             self?.overlayWindow?.orderOut(nil)
             self?.overlayWindow = nil
             completion(color)
@@ -50,9 +57,11 @@ class ColorPickerView: NSView {
     private let magnification: CGFloat = 8
     private let captureRadius: CGFloat = 8
     private var lastUpdateTime: CFTimeInterval = 0
+    private let snapshot: ScreenGrabber.Snapshot?
 
-    init(frame: NSRect, completion: @escaping (NSColor) -> Void) {
+    init(frame: NSRect, snapshot: ScreenGrabber.Snapshot?, completion: @escaping (NSColor) -> Void) {
         self.completion = completion
+        self.snapshot = snapshot
         super.init(frame: frame)
         setupTracking()
     }
@@ -81,7 +90,7 @@ class ColorPickerView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        // Throttle to ~60fps — CGWindowListCreateImage is expensive
+        // Throttle to ~60fps
         let now = CACurrentMediaTime()
         guard now - lastUpdateTime > 0.016 else {
             needsDisplay = true
@@ -100,7 +109,7 @@ class ColorPickerView: NSView {
         pasteboard.clearContents()
         pasteboard.setString(currentHex, forType: .string)
 
-        Toast.show(message: "Copied \(currentHex)")
+        Toast.show(message: "Copié : \(currentHex)")
         completion(currentColor)
     }
 
@@ -118,29 +127,11 @@ class ColorPickerView: NSView {
             width: captureSize,
             height: captureSize
         )
-        magnifiedImage = CGWindowListCreateImage(
-            captureRect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution]
-        )
+        magnifiedImage = snapshot?.crop(captureRect)
 
         // Sample center pixel
-        guard let image = CGWindowListCreateImage(
-            CGRect(x: cgPoint.x, y: cgPoint.y, width: 1, height: 1),
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.nominalResolution]
-        ) else { return }
-
-        guard let dataProvider = image.dataProvider,
-              let data = dataProvider.data,
-              let ptr = CFDataGetBytePtr(data),
-              CFDataGetLength(data) >= 4 else { return }
-
-        let r = ptr[0]
-        let g = ptr[1]
-        let b = ptr[2]
+        guard let pixel = snapshot?.color(at: cgPoint) else { return }
+        let r = pixel.r, g = pixel.g, b = pixel.b
 
         currentColor = NSColor(red: CGFloat(r) / 255.0, green: CGFloat(g) / 255.0, blue: CGFloat(b) / 255.0, alpha: 1.0)
         currentHex = String(format: "#%02X%02X%02X", r, g, b)

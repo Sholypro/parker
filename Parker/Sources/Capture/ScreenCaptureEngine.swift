@@ -18,8 +18,9 @@ class ScreenCaptureEngine {
                     return
                 }
 
-                guard let image = CGDisplayCreateImage(screen.displayID) else {
+                guard let image = ScreenGrabber.capture(displayID: screen.displayID) else {
                     self.restoreDesktopIconsIfNeeded()
+                    ScreenGrabber.reportFailureIfNeeded()
                     completion(.failure(CaptureError.captureFailed))
                     return
                 }
@@ -50,17 +51,13 @@ class ScreenCaptureEngine {
             self?.activeAreaSelector = nil  // Release after completion
             guard let self = self else { return }
             switch result {
-            case .success(let (rect, overlayWindowID)):
+            case .success(let (rect, _)):
                 self.performWithDelay {
                     self.hideDesktopIconsIfNeeded()
 
-                    guard let image = CGWindowListCreateImage(
-                        rect,
-                        .optionOnScreenBelowWindow,
-                        overlayWindowID,
-                        [.bestResolution]
-                    ) else {
+                    guard let image = ScreenGrabber.capture(rect: rect) else {
                         self.restoreDesktopIconsIfNeeded()
+                        ScreenGrabber.reportFailureIfNeeded()
                         completion(.failure(CaptureError.captureFailed))
                         return
                     }

@@ -100,12 +100,7 @@ class ScrollCapture {
     }
 
     private func grabFrame() -> CGImage? {
-        guard let image = CGWindowListCreateImage(
-            captureRect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution]
-        ) else { return nil }
+        guard let image = ScreenGrabber.capture(rect: captureRect) else { return nil }
         if captureRect.height > 0 {
             pixelScale = CGFloat(image.height) / captureRect.height
         }

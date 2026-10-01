@@ -44,12 +44,7 @@ class MagnifierView: NSView {
             height: captureSize
         )
 
-        capturedRegion = CGWindowListCreateImage(
-            captureRect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.nominalResolution]
-        )
+        capturedRegion = ScreenGrabber.capture(rect: captureRect)
 
         needsDisplay = true
     }

@@ -8,13 +8,9 @@ class OCRTool {
         let selector = AreaSelector { [weak self] result in
             self?.activeAreaSelector = nil  // Release after completion
             switch result {
-            case .success(let (rect, overlayWindowID)):
-                guard let image = CGWindowListCreateImage(
-                    rect,
-                    .optionOnScreenBelowWindow,
-                    overlayWindowID,
-                    [.bestResolution]
-                ) else {
+            case .success(let (rect, _)):
+                guard let image = ScreenGrabber.capture(rect: rect) else {
+                    ScreenGrabber.reportFailureIfNeeded()
                     completion(.failure(CaptureError.captureFailed))
                     return
                 }

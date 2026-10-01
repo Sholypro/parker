@@ -125,9 +125,8 @@ class WindowSelectorView: NSView {
         }
 
         let includeShadow = Defaults.shared.includeWindowShadow
-        let imageOption: CGWindowImageOption = includeShadow ? [.bestResolution] : [.boundsIgnoreFraming, .bestResolution]
-
-        guard let image = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, imageOption) else {
+        guard let image = ScreenGrabber.capture(windowID: windowID, includeShadow: includeShadow) else {
+            ScreenGrabber.reportFailureIfNeeded()
             completion(.failure(CaptureError.captureFailed))
             return
         }

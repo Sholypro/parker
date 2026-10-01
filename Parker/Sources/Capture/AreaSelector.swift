@@ -15,11 +15,18 @@ class AreaSelector {
             return
         }
 
-        // Optionally freeze the screen by capturing only this display
-        var frozenImage: CGImage?
-        if Defaults.shared.freezeScreen {
-            frozenImage = CGDisplayCreateImage(screen.displayID)
+        // Capture the display once (ScreenCaptureKit) before showing the overlay:
+        // used for the magnifier, and shown frozen when "Freeze screen" is on.
+        let snapshot = ScreenGrabber.snapshot(displayContaining: CGPoint(
+            x: screen.frame.midX,
+            y: NSScreen.primaryHeight - screen.frame.midY
+        ))
+        if snapshot == nil {
+            ScreenGrabber.reportFailureIfNeeded()
+            completion(.failure(CaptureError.captureFailed))
+            return
         }
+        let frozenImage: CGImage? = Defaults.shared.freezeScreen ? snapshot?.image : nil
 
         let window = NSWindow(
             contentRect: screen.frame,
@@ -34,7 +41,7 @@ class AreaSelector {
         window.ignoresMouseEvents = false
         window.acceptsMouseMovedEvents = true
 
-        let view = AreaSelectorView(frame: screen.frame, frozenImage: frozenImage) { [weak self] result in
+        let view = AreaSelectorView(frame: screen.frame, frozenImage: frozenImage, snapshot: snapshot) { [weak self] result in
             switch result {
             case .success(let rect):
                 let windowID = CGWindowID(self?.overlayWindow?.windowNumber ?? 0)
@@ -66,14 +73,16 @@ class AreaSelectorView: NSView {
     private let completion: (Result<CGRect, Error>) -> Void
     private var trackingArea: NSTrackingArea?
     private var frozenImage: CGImage?
+    private var snapshot: ScreenGrabber.Snapshot?
 
     // Space-to-reposition state
     private var isRepositioning = false
     private var repositionLastPoint: NSPoint?
 
-    init(frame: NSRect, frozenImage: CGImage? = nil, completion: @escaping (Result<CGRect, Error>) -> Void) {
+    init(frame: NSRect, frozenImage: CGImage? = nil, snapshot: ScreenGrabber.Snapshot? = nil, completion: @escaping (Result<CGRect, Error>) -> Void) {
         self.completion = completion
         self.frozenImage = frozenImage
+        self.snapshot = snapshot
         super.init(frame: frame)
         setupTracking()
     }
@@ -340,12 +349,7 @@ class AreaSelectorView: NSView {
             height: captureRadius * 2
         )
 
-        guard let capturedImage = CGWindowListCreateImage(
-            captureRect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution]
-        ) else { return }
+        guard let capturedImage = snapshot?.crop(captureRect) else { return }
 
         // Position loupe offset from cursor
         let offset: CGFloat = 24
