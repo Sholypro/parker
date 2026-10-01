@@ -35,7 +35,7 @@ class MenuBarController {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Parker")
+            button.image = MenuBarIcon.make()
             button.target = self
             button.action = #selector(toggleStatusMenu(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
