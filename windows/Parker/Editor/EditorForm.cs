@@ -43,6 +43,7 @@ namespace Parker
             BackColor = Color.FromArgb(30, 30, 33);
             ForeColor = Color.White;
             KeyPreview = true;
+            AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Segoe UI", 9f);
             MinimumSize = new Size(820, 420);

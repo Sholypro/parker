@@ -80,8 +80,11 @@ namespace Parker
                     // Show the same menu on left click
                     var mi = typeof(NotifyIcon).GetMethod("ShowContextMenu", BindingFlags.Instance | BindingFlags.NonPublic);
                     if (mi != null) mi.Invoke(tray, null);
+                    else menu.Show(Cursor.Position);
                 }
             };
+
+            Application.ApplicationExit += (s, e) => { tray.Visible = false; };
 
             hotkeys = new Hotkeys();
             var mods = Native.MOD_CONTROL | Native.MOD_SHIFT;

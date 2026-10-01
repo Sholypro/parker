@@ -25,6 +25,18 @@ Outil de capture d'écran natif macOS, dans l'esprit de CleanShot X. Basé sur l
 > **Astuce (évite de redonner les autorisations à chaque recompilation)**
 > Lance une fois `./scripts/setup-signing.sh` (voir plus bas). Le script de build utilise ensuite automatiquement ce certificat.
 
+## Version Windows
+
+Parker existe aussi pour **Windows 10 (version 2004 ou plus récente) et Windows 11**. Chaque release contient `Parker-Windows.zip`.
+
+* **Installation :** télécharger `Parker-Windows.zip` sur [la page des releases](https://github.com/Sholypro/parker/releases/latest), dézipper, ranger `Parker.exe` où tu veux (par exemple `Documents\Parker`) et le lancer. Aucune autorisation à donner.
+* **Premier lancement :** Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (l'app n'est pas signée par un éditeur payant). Cliquer sur **Informations complémentaires**, puis **Exécuter quand même**.
+* **Utilisation :** Parker vit dans la zone de notification (à côté de l'horloge, parfois derrière la petite flèche ^). Clic sur l'icône = menu.
+* **Raccourcis :** `Ctrl+Maj+4` zone · `Ctrl+Maj+3` écran · `Ctrl+Maj+5` fenêtre · `Ctrl+Maj+6` capture défilante · `Ctrl+Maj+7` épingler la dernière capture.
+* **Captures :** enregistrées dans `Images\Parker` (modifiable dans les Réglages), et copiées dans le presse-papiers.
+* **Mises à jour :** automatiques, comme sur Mac (menu **Rechercher des mises à jour…**).
+* **Code :** dossier `windows/` (C# .NET 8, WinForms), compilé par GitHub à chaque version.
+
 ## Partager avec des collègues + mises à jour automatiques
 
 Le dépôt GitHub sert de « serveur de mises à jour » : chaque version publiée est compilée par GitHub, puis l'app de chacun la propose toute seule (au lancement, au plus une fois toutes les 6 h, ou via le menu **Rechercher des mises à jour…**).

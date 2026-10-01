@@ -121,6 +121,7 @@ namespace Parker
         bool spaceMoving;
         Point lastMove;
         Rectangle? hoverWindow;
+        Bitmap bright, dimmed; // this monitor's part of the snapshot, plain and darkened
 
         static readonly Color Accent = Color.FromArgb(0x21, 0x55, 0xFF);
 
@@ -153,8 +154,35 @@ namespace Parker
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            Bounds = screen.Bounds; // re-apply after DPI change on move
+            Bounds = screen.Bounds; // re-apply in case a DPI change resized the window
             Native.ExcludeFromCapture(Handle);
+        }
+
+        void EnsureBackgrounds()
+        {
+            if (bright != null) return;
+            var vs = ScreenGrab.VirtualScreen;
+            var src = new Rectangle(screen.Bounds.X - vs.X, screen.Bounds.Y - vs.Y, screen.Bounds.Width, screen.Bounds.Height);
+            bright = new Bitmap(src.Width, src.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (var g = Graphics.FromImage(bright))
+                g.DrawImage(owner.Snapshot, new Rectangle(0, 0, src.Width, src.Height), src, GraphicsUnit.Pixel);
+            dimmed = new Bitmap(src.Width, src.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (var g = Graphics.FromImage(dimmed))
+            using (var dim = new SolidBrush(Color.FromArgb(110, 0, 0, 0)))
+            {
+                g.DrawImageUnscaled(bright, 0, 0);
+                g.FillRectangle(dim, 0, 0, src.Width, src.Height);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (bright != null) bright.Dispose();
+                if (dimmed != null) dimmed.Dispose();
+            }
+            base.Dispose(disposing);
         }
 
         Point ToVirtual(Point client) { return new Point(client.X + Bounds.X, client.Y + Bounds.Y); }
@@ -244,20 +272,19 @@ namespace Parker
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            var vs = ScreenGrab.VirtualScreen;
-            var src = new Rectangle(Bounds.X - vs.X, Bounds.Y - vs.Y, Bounds.Width, Bounds.Height);
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(owner.Snapshot, new Rectangle(0, 0, Width, Height), src, GraphicsUnit.Pixel);
+            EnsureBackgrounds();
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.DrawImageUnscaled(dimmed, 0, 0);
+            g.CompositingMode = CompositingMode.SourceOver;
 
             Rectangle? highlight = selection;
             if (!highlight.HasValue && owner.Mode == SelectMode.Window) highlight = hoverWindow;
 
-            using (var dim = new SolidBrush(Color.FromArgb(110, 0, 0, 0)))
-            using (var region = new Region(new Rectangle(0, 0, Width, Height)))
+            if (highlight.HasValue)
             {
-                if (highlight.HasValue) region.Exclude(ToClient(highlight.Value));
-                g.FillRegion(dim, region);
+                var hr = ToClient(highlight.Value);
+                hr.Intersect(new Rectangle(0, 0, Width, Height));
+                if (hr.Width > 0 && hr.Height > 0) g.DrawImage(bright, hr, hr, GraphicsUnit.Pixel);
             }
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
