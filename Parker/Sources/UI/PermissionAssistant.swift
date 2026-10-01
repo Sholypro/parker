@@ -48,7 +48,7 @@ final class PermissionAssistant: NSObject, NSWindowDelegate {
     }
 
     private var window: NSWindow?
-    private var rows: [Step: PermissionRow] = [:]
+    private var rows: [Step: AssistantPermissionRow] = [:]
     private var footer: NSButton?
     private var helper: NSPanel?
     private var helperStep: Step?
@@ -141,7 +141,7 @@ final class PermissionAssistant: NSObject, NSWindowDelegate {
         stack.setCustomSpacing(22, after: header)
 
         for step in Step.allCases {
-            let row = PermissionRow(step: step)
+            let row = AssistantPermissionRow(step: step)
             row.onAuthorize = { [weak self] in self?.begin(step) }
             row.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(row)
@@ -178,7 +178,7 @@ final class PermissionAssistant: NSObject, NSWindowDelegate {
 
     private func refresh() {
         for (step, row) in rows {
-            let state: PermissionRow.State
+            let state: AssistantPermissionRow.State
             if isGranted(step) {
                 state = .granted
             } else if step == .screenRecording && screenRecordingAwaitingRelaunch {
@@ -288,7 +288,7 @@ final class PermissionAssistant: NSObject, NSWindowDelegate {
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let view = DragHelperView(frame: NSRect(origin: .zero, size: size), step: step)
+        let view = AssistantDragHelperView(frame: NSRect(origin: .zero, size: size), step: step)
         view.onDone = { [weak self] in
             guard let self = self else { return }
             self.hideHelper()
@@ -367,7 +367,7 @@ final class PermissionAssistant: NSObject, NSWindowDelegate {
 
 // MARK: - Row in the main window
 
-private final class PermissionRow: NSView {
+private final class AssistantPermissionRow: NSView {
     enum State { case pending, needsRelaunch, granted }
 
     var onAuthorize: (() -> Void)?
@@ -453,7 +453,7 @@ private final class PermissionRow: NSView {
 
 // MARK: - Floating card with the draggable app icon
 
-private final class DragHelperView: NSView, NSDraggingSource {
+private final class AssistantDragHelperView: NSView, NSDraggingSource {
     var onDone: (() -> Void)?
     private let step: PermissionAssistant.Step
     private let iconView = NSImageView()
