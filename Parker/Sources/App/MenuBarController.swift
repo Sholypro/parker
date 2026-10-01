@@ -162,6 +162,7 @@ class MenuBarController {
 
         menu.addItem(makeItem("À propos de Parker", icon: "info.circle", action: #selector(showAbout)))
         menu.addItem(makeItem("Rechercher des mises à jour…", icon: "arrow.triangle.2.circlepath", action: #selector(checkForUpdates)))
+        menu.addItem(makeItem("Autorisations…", icon: "lock.shield", action: #selector(showPermissions)))
         menu.addItem(makeItem("Réglages…", icon: "gear", action: #selector(openPreferences), key: ",", modifiers: [.command]))
 
         menu.addItem(NSMenuItem.separator())
@@ -380,6 +381,10 @@ class MenuBarController {
     @objc private func clearRecentCaptures() {
         Defaults.shared.clearRecentCaptures()
         rebuildMenu()
+    }
+
+    @objc private func showPermissions() {
+        PermissionAssistant.shared.show()
     }
 
     @objc private func checkForUpdates() {

@@ -79,7 +79,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Show onboarding on first launch
-        onboardingController.showIfNeeded()
+        // Permissions assistant (drag Parker into System Settings) when something is missing
+        PermissionAssistant.shared.showIfNeeded()
 
         // Look for a newer version on GitHub (silent, at most every 6 h)
         UpdateChecker.shared.checkInBackgroundIfNeeded()

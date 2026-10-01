@@ -143,22 +143,9 @@ enum ScreenGrabber {
             Toast.show(message: "La capture a échoué", style: .error)
             return
         }
-        guard !didWarnAboutPermission else {
-            Toast.show(message: "Autorise Parker dans Enregistrement de l'écran", style: .error, duration: 4)
-            return
-        }
         didWarnAboutPermission = true
         DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-            let alert = NSAlert()
-            alert.messageText = "Parker n'a pas accès à l'écran"
-            alert.informativeText = "Active Parker dans Réglages Système > Confidentialité et sécurité > Enregistrement de l'écran, puis relance Parker."
-            alert.addButton(withTitle: "Ouvrir les Réglages")
-            alert.addButton(withTitle: "Plus tard")
-            if alert.runModal() == .alertFirstButtonReturn {
-                AppPermissions.requestScreenRecordingPermission()
-                AppPermissions.openScreenRecordingSettings()
-            }
+            PermissionAssistant.shared.show()
         }
     }
 

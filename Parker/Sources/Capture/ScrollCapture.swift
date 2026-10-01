@@ -192,8 +192,8 @@ class ScrollCapture {
 
         // Synthetic scroll events require Accessibility permission
         guard AXIsProcessTrusted() else {
-            AppPermissions.requestAccessibilityPermission()
-            showWarning("Autorise Parker dans Réglages > Confidentialité > Accessibilité")
+            showWarning("Autorise Parker dans Accessibilité (fenêtre d'aide ouverte)")
+            PermissionAssistant.shared.show()
             return
         }
 
