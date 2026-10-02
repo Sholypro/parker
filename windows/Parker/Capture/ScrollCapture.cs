@@ -1,13 +1,15 @@
 using System;
 using System.Drawing;
+using System.Collections.Generic;
 using System.Drawing.Drawing2D;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Parker
 {
     /// <summary>
-    /// Scrolling capture: select an area, then scroll yourself (frames sampled ~7/s and stitched
+    /// Scrolling capture: select an area, then scroll yourself (frames captured ~22/s and stitched
     /// live) or press Auto and Parker scrolls to the end of the page. Live preview on the side.
     /// The HUD, border and preview are excluded from capture (WDA_EXCLUDEFROMCAPTURE).
     /// </summary>
@@ -16,13 +18,20 @@ namespace Parker
         readonly Action<string> onDone;
         Rectangle area;
         ScrollStitcher stitcher;
-        Timer timer;
-        bool busy, auto, active, pendingFinish, pendingCancel;
+        readonly object stitchLock = new object();
+        FrameBuffer buffer;
+        SynchronizationContext ui;
+        System.Windows.Forms.Timer keyTimer;
+        volatile bool active, auto;
         int autoUnchanged, autoNoMatch, autoStep;
         HudForm hud;
         BorderForm border;
         PreviewForm preview;
+        string lastStatus;
+        bool lastWarning;
         const int MaxHeight = 40000;
+        const int FrameIntervalMs = 45;   // ~22 frames per second
+        const int PreviewIntervalMs = 250;
 
         public ScrollCapture(Action<string> onDone) { this.onDone = onDone; }
 
@@ -39,7 +48,9 @@ namespace Parker
 
         void Begin()
         {
+            ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             stitcher = new ScrollStitcher();
+            buffer = new FrameBuffer((long)area.Width * area.Height * 4);
             active = true;
             border = new BorderForm(area);
             border.Show();
@@ -50,47 +61,93 @@ namespace Parker
             hud.Show();
             preview = new PreviewForm(area);
             preview.Show();
-            hud.SetStatus("Fais défiler, ou lance l'auto-scroll", false);
+            SetStatus("Fais défiler, ou lance l'auto-scroll", false);
 
-            timer = new Timer { Interval = 140 };
-            timer.Tick += (s, e) =>
-            {
-                // Esc works even when another app has the focus
-                if ((Native.GetAsyncKeyState(0x1B) & 0x8000) != 0) { Cancel(); return; }
-                if (!auto) Step(null);
-            };
-            timer.Start();
-            Step(null);
+            // Esc works even when another app has the focus
+            keyTimer = new System.Windows.Forms.Timer { Interval = 80 };
+            keyTimer.Tick += (s, e) => { if ((Native.GetAsyncKeyState(0x1B) & 0x8000) != 0) Cancel(); };
+            keyTimer.Start();
+
+            // Capture continuously on one thread, stitch on another: a slow stitch never makes
+            // the capture miss the frames in between (they are kept and used to bridge the gap).
+            new Thread(CaptureLoop) { IsBackground = true, Name = "Parker scroll capture" }.Start();
+            new Thread(StitchLoop) { IsBackground = true, Name = "Parker scroll stitch" }.Start();
         }
 
-        void Step(int? expected, Action<ScrollStitcher.Result> then = null)
+        void CaptureLoop()
         {
-            if (!active || busy) return;
-            busy = true;
-            var frame = ScreenGrab.Capture(area);
-            Task.Run(() =>
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            while (active)
             {
-                var result = stitcher.Add(frame, expected);
+                var t0 = watch.ElapsedMilliseconds;
+                if (!auto)
+                {
+                    var frame = Grab();
+                    if (frame != null) buffer.Push(frame);
+                }
+                var wait = FrameIntervalMs - (int)(watch.ElapsedMilliseconds - t0);
+                Thread.Sleep(Math.Max(5, wait));
+            }
+        }
+
+        Bitmap Grab()
+        {
+            try { return ScreenGrab.Capture(area); }
+            catch { return null; }   // e.g. secure desktop (UAC prompt, lock screen)
+        }
+
+        void StitchLoop()
+        {
+            var lastPreview = DateTime.MinValue;
+            while (active)
+            {
+                if (auto || buffer.Count == 0) { Thread.Sleep(10); continue; }
+                ScrollStitcher.Result result;
                 Bitmap thumb = null;
-                if (result == ScrollStitcher.Result.First || result == ScrollStitcher.Result.Appended) thumb = stitcher.Compose(260);
-                var height = stitcher.TotalHeight;
-                return Tuple.Create(result, thumb, height);
-            }).ContinueWith(t =>
+                int height;
+                lock (stitchLock)
+                {
+                    if (!active || auto) continue;
+                    result = stitcher.AddBatch(buffer.Drain(), null);
+                    height = stitcher.TotalHeight;
+                    var grew = result == ScrollStitcher.Result.First || result == ScrollStitcher.Result.Appended;
+                    if (grew && (DateTime.Now - lastPreview).TotalMilliseconds >= PreviewIntervalMs)
+                    {
+                        thumb = stitcher.Compose(260);
+                        lastPreview = DateTime.Now;
+                    }
+                }
+                var r = result; var th = thumb; var hgt = height;
+                ui.Post(_ => Handle(r, th, hgt), null);
+            }
+        }
+
+        void Handle(ScrollStitcher.Result result, Bitmap thumb, int height)
+        {
+            if (!active) { if (thumb != null) thumb.Dispose(); return; }
+            if (thumb != null) preview.SetImage(thumb);
+            preview.SetHeight(height);
+            switch (result)
             {
-                busy = false;
-                if (pendingCancel) { pendingCancel = false; if (t.Result.Item2 != null) t.Result.Item2.Dispose(); Cancel(); return; }
-                if (pendingFinish) { pendingFinish = false; if (t.Result.Item2 != null) t.Result.Item2.Dispose(); Finish(); return; }
-                if (!active) { if (t.Result.Item2 != null) t.Result.Item2.Dispose(); return; }
-                var r = t.Result;
-                if (r.Item2 != null) preview.SetImage(r.Item2);
-                preview.SetHeight(r.Item3);
-                if (r.Item1 == ScrollStitcher.Result.NoMatch && !auto)
-                    hud.SetStatus("Trop rapide : remonte un peu, puis défile plus doucement", true);
-                else if (r.Item1 == ScrollStitcher.Result.Appended)
-                    hud.SetStatus(auto ? "Auto-scroll en cours…" : "Capture en cours, continue de défiler", false);
-                if (r.Item3 >= MaxHeight) { Finish(); return; }
-                if (then != null) then(r.Item1);
-            }, TaskScheduler.FromCurrentSynchronizationContext());
+                case ScrollStitcher.Result.NoMatch:
+                    if (!auto) SetStatus("Trop rapide : remonte un peu, la capture reprendra toute seule", true);
+                    break;
+                case ScrollStitcher.Result.Repositioned:
+                    if (!auto) SetStatus("Zone déjà capturée : redescends pour continuer", false);
+                    break;
+                case ScrollStitcher.Result.Appended:
+                    SetStatus(auto ? "Auto-scroll en cours…" : (lastWarning ? "C'est reparti, continue de défiler" : "Capture en cours, continue de défiler"), false);
+                    break;
+            }
+            if (height >= MaxHeight) Finish();
+        }
+
+        void SetStatus(string text, bool warning)
+        {
+            if (hud == null) return;
+            if (text == lastStatus && warning == lastWarning) return;
+            lastStatus = text; lastWarning = warning;
+            hud.SetStatus(text, warning);
         }
 
         void ToggleAuto()
@@ -100,13 +157,13 @@ namespace Parker
             {
                 auto = false;
                 hud.SetAuto(false);
-                hud.SetStatus("Auto-scroll en pause", false);
+                SetStatus("Auto-scroll en pause", false);
                 return;
             }
             auto = true;
             autoUnchanged = 0; autoNoMatch = 0;
             hud.SetAuto(true);
-            hud.SetStatus("Auto-scroll en cours…", false);
+            SetStatus("Auto-scroll en cours…", false);
             // Cursor over the content so the wheel events reach the right window
             Native.SetCursorPos(area.X + area.Width / 2, area.Y + area.Height / 2);
             AutoStep();
@@ -119,27 +176,43 @@ namespace Parker
             autoStep = Math.Max(1, Math.Min(6, area.Height / 300)) * 120;
             Native.SetCursorPos(area.X + area.Width / 2, area.Y + area.Height / 2);
             Native.ScrollWheel(-autoStep);
-            var wait = new Timer { Interval = 320 };
+            var wait = new System.Windows.Forms.Timer { Interval = 320 };
             wait.Tick += (s, e) =>
             {
                 wait.Stop(); wait.Dispose();
                 if (!active || !auto) return;
-                int? expected = stitcher.LastDelta > 0 ? (int?)stitcher.LastDelta : null;
-                Step(expected, result =>
+                int? expected;
+                lock (stitchLock) expected = stitcher.LastDelta > 0 ? (int?)stitcher.LastDelta : null;
+                Task.Run(() =>
                 {
+                    var frame = Grab();
+                    lock (stitchLock)
+                    {
+                        var frames = buffer.Drain();
+                        if (frame != null) frames.Add(frame);
+                        if (!active) { foreach (var f in frames) f.Dispose(); return Tuple.Create(ScrollStitcher.Result.NoMatch, (Bitmap)null, 0); }
+                        var res = stitcher.AddBatch(frames, expected);
+                        Bitmap thumb = null;
+                        if (res == ScrollStitcher.Result.First || res == ScrollStitcher.Result.Appended) thumb = stitcher.Compose(260);
+                        return Tuple.Create(res, thumb, stitcher.TotalHeight);
+                    }
+                }).ContinueWith(t =>
+                {
+                    var r = t.Result;
+                    Handle(r.Item1, r.Item2, r.Item3);
                     if (!active || !auto) return;
-                    if (result == ScrollStitcher.Result.Unchanged) { autoUnchanged++; autoNoMatch = 0; }
-                    else if (result == ScrollStitcher.Result.NoMatch) autoNoMatch++;
+                    if (r.Item1 == ScrollStitcher.Result.Unchanged) { autoUnchanged++; autoNoMatch = 0; }
+                    else if (r.Item1 == ScrollStitcher.Result.NoMatch) autoNoMatch++;
                     else { autoUnchanged = 0; autoNoMatch = 0; }
 
                     if (autoUnchanged >= 2) Finish();            // nothing moves: end of page
                     else if (autoNoMatch >= 3)
                     {
                         auto = false; hud.SetAuto(false);
-                        hud.SetStatus("Auto-scroll arrêté : contenu impossible à raccorder", true);
+                        SetStatus("Auto-scroll arrêté : contenu impossible à raccorder", true);
                     }
                     else AutoStep();
-                });
+                }, TaskScheduler.FromCurrentSynchronizationContext());
             };
             wait.Start();
         }
@@ -147,21 +220,27 @@ namespace Parker
         void Finish()
         {
             if (!active) return;
-            if (busy) { pendingFinish = true; return; }
             active = false; auto = false;
             Teardown();
-            var last = ScreenGrab.Capture(area);
             var st = stitcher;
+            var buf = buffer;
             Task.Run(() =>
             {
-                st.Add(last, null);
-                var image = st.Compose();
-                st.Dispose();
-                return image;
+                Thread.Sleep(60); // let the HUD disappear before the last frame
+                var last = Grab();
+                lock (stitchLock)
+                {
+                    var frames = buf.Drain();
+                    if (last != null) frames.Add(last);
+                    st.AddBatch(frames, null);
+                    var image = st.Compose();
+                    st.Dispose();
+                    return image;
+                }
             }).ContinueWith(t =>
             {
                 var image = t.Result;
-                if (image == null) return;
+                if (image == null) { onDone(null); return; }
                 var path = ImageStore.Finish(image);
                 image.Dispose();
                 onDone(path);
@@ -171,18 +250,69 @@ namespace Parker
         void Cancel()
         {
             if (!active) return;
-            if (busy) { pendingCancel = true; return; }
             active = false; auto = false;
             Teardown();
-            stitcher.Dispose();
+            var st = stitcher;
+            var buf = buffer;
+            Task.Run(() =>
+            {
+                lock (stitchLock)
+                {
+                    foreach (var f in buf.Drain()) f.Dispose();
+                    st.Dispose();
+                }
+            });
         }
 
         void Teardown()
         {
-            if (timer != null) { timer.Stop(); timer.Dispose(); timer = null; }
+            if (keyTimer != null) { keyTimer.Stop(); keyTimer.Dispose(); keyTimer = null; }
             if (hud != null) { hud.Close(); hud = null; }
             if (border != null) { border.Close(); border = null; }
             if (preview != null) { preview.Close(); preview = null; }
+        }
+
+        /// <summary>
+        /// Frames waiting to be stitched. When the stitcher falls behind, every other frame is
+        /// dropped (newest always kept) so memory stays bounded while gaps stay small.
+        /// </summary>
+        sealed class FrameBuffer
+        {
+            readonly List<Bitmap> frames = new List<Bitmap>();
+            readonly int max;
+
+            public FrameBuffer(long frameBytes)
+            {
+                max = (int)Math.Max(3, Math.Min(16, 240L * 1024 * 1024 / Math.Max(1, frameBytes)));
+            }
+
+            public int Count { get { lock (frames) return frames.Count; } }
+
+            public void Push(Bitmap frame)
+            {
+                lock (frames)
+                {
+                    frames.Add(frame);
+                    if (frames.Count > max)
+                    {
+                        for (var i = frames.Count - 2; i >= 1; i -= 2)
+                        {
+                            frames[i].Dispose();
+                            frames.RemoveAt(i);
+                        }
+                    }
+                }
+            }
+
+            public List<Bitmap> Drain()
+            {
+                lock (frames)
+                {
+                    var list = new List<Bitmap>(frames);
+                    frames.Clear();
+                    return list;
+                }
+            }
         }
 
         // ---------- Windows ----------

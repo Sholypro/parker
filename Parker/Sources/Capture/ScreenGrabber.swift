@@ -22,9 +22,10 @@ enum ScreenGrabber {
     // MARK: - Public API (coordinates: global, top-left origin, points, like CGDisplayBounds)
 
     /// Captures a rectangle of the screen. Parker's own windows (overlays, HUD) are excluded.
-    static func capture(rect: CGRect, excludingOwnWindows: Bool = true) -> CGImage? {
+    /// `maxContentAge` (seconds) lets repeated captures reuse the list of displays and apps.
+    static func capture(rect: CGRect, excludingOwnWindows: Bool = true, maxContentAge: TimeInterval = 0) -> CGImage? {
         guard rect.width >= 1, rect.height >= 1 else { return nil }
-        return run { content in
+        return run(maxContentAge: maxContentAge) { content in
             guard let display = display(for: rect, in: content) else { throw Failure.noDisplay }
             let filter = makeFilter(display: display, content: content, excludeOwn: excludingOwnWindows)
             let scale = pixelScale(for: filter, display: display)
@@ -191,12 +192,37 @@ enum ScreenGrabber {
         var failure: Failure?
     }
 
-    private static func run(_ work: @escaping (SCShareableContent) async throws -> CGImage) -> CGImage? {
+    private static let cacheLock = NSLock()
+    private static var cachedContent: SCShareableContent?
+    private static var cachedAt = Date.distantPast
+
+    private static func shareableContent(maxAge: TimeInterval) async throws -> SCShareableContent {
+        if maxAge > 0, let cached = ScreenGrabber.cachedContent(maxAge: maxAge) { return cached }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        ScreenGrabber.storeContent(content)
+        return content
+    }
+
+    private static func cachedContent(maxAge: TimeInterval) -> SCShareableContent? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard Date().timeIntervalSince(cachedAt) <= maxAge else { return nil }
+        return cachedContent
+    }
+
+    private static func storeContent(_ content: SCShareableContent) {
+        cacheLock.lock()
+        cachedContent = content
+        cachedAt = Date()
+        cacheLock.unlock()
+    }
+
+    private static func run(maxContentAge: TimeInterval = 0, _ work: @escaping (SCShareableContent) async throws -> CGImage) -> CGImage? {
         let box = Box()
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached(priority: .userInitiated) {
             do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                let content = try await ScreenGrabber.shareableContent(maxAge: maxContentAge)
                 box.image = try await work(content)
             } catch let failure as Failure {
                 box.failure = failure

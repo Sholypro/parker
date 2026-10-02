@@ -1,0 +1,17 @@
+# Compile la version Mac à chaque modification (sans publier).
+name: Mac CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["Parker/**", ".github/workflows/mac-ci.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: Parker
+        run: swift build -c release

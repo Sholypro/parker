@@ -2,9 +2,11 @@ import Cocoa
 import ApplicationServices
 
 /// Scrolling capture, CleanShot style:
-/// select an area, then either scroll yourself (frames are sampled ~7x/s and stitched live)
-/// or press "Auto" to let the app scroll for you until the end of the page.
+/// select an area, then either scroll yourself (the area is streamed at up to 30 fps and
+/// stitched live) or press "Auto" to let the app scroll for you until the end of the page.
 /// A live preview of the stitched result is shown next to the area.
+/// If a scroll is too fast, the capture resumes by itself as soon as the view shows
+/// something already captured (scrolling back up a little is enough).
 class ScrollCapture {
     var completion: ((Result<URL, Error>) -> Void)?
 
@@ -12,15 +14,16 @@ class ScrollCapture {
     private var nsRect: NSRect = .zero        // Cocoa coordinates, bottom-left origin
     private let stitcher = ScrollStitcher()
     private let workQueue = DispatchQueue(label: "parker.scroll.stitch", qos: .userInitiated)
+    private var source: ScrollFrameSource?
 
     private var isCapturing = false
     private var isProcessing = false
-    private var manualTimer: Timer?
     private var autoScrolling = false
     private var autoUnchangedCount = 0
     private var autoNoMatchCount = 0
     private var lastHeight = 0
-    private var pixelScale: CGFloat = 2
+    private var lastPreviewTime = Date.distantPast   // workQueue only
+    private var recovering = false
 
     private var activeAreaSelector: AreaSelector?
     private var borderWindow: NSWindow?
@@ -33,8 +36,10 @@ class ScrollCapture {
     private var warningResetWork: DispatchWorkItem?
 
     private let maxOutputHeight = 40_000
-    private let manualInterval: TimeInterval = 0.14
     private let autoSettleDelay: TimeInterval = 0.35
+    private let previewInterval: TimeInterval = 0.25
+
+    private var pixelScale: CGFloat { source?.pixelScale ?? 2 }
 
     // MARK: - Public
 
@@ -75,13 +80,17 @@ class ScrollCapture {
             height: captureRect.height
         )
 
-        workQueue.sync { stitcher.reset() }
+        workQueue.sync {
+            stitcher.reset()
+            lastPreviewTime = .distantPast
+        }
         isCapturing = true
         isProcessing = false
         autoScrolling = false
         autoUnchangedCount = 0
         autoNoMatchCount = 0
         lastHeight = 0
+        recovering = false
 
         showBorderOverlay()
         showHUD()
@@ -89,51 +98,41 @@ class ScrollCapture {
         installKeyMonitors()
         hudView?.setStatus("Fais défiler, ou lance l'auto-scroll", warning: false)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.captureAndProcess(expectedDelta: nil, done: nil)
+        let source = ScrollFrameSource(rect: captureRect)
+        source.onFrame = { [weak self] in
+            DispatchQueue.main.async { self?.processPendingFrames() }
         }
-
-        manualTimer = Timer.scheduledTimer(withTimeInterval: manualInterval, repeats: true) { [weak self] _ in
-            guard let self = self, self.isCapturing, !self.autoScrolling, !self.isProcessing else { return }
-            self.captureAndProcess(expectedDelta: nil, done: nil)
-        }
-    }
-
-    private func grabFrame() -> CGImage? {
-        guard let image = ScreenGrabber.capture(rect: captureRect) else { return nil }
-        if captureRect.height > 0 {
-            pixelScale = CGFloat(image.height) / captureRect.height
-        }
-        return image
-    }
-
-    private func captureAndProcess(expectedDelta: Int?, done: ((ScrollStitcher.AddResult) -> Void)?) {
-        guard isCapturing else { return }
-        if isProcessing {
-            // Only the auto loop passes a completion; retry shortly instead of dropping it
-            if done != nil {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                    self?.captureAndProcess(expectedDelta: expectedDelta, done: done)
-                }
+        self.source = source
+        source.start { [weak self] ok in
+            guard let self = self, self.isCapturing, !ok else { return }
+            // The fallback still works, just with fewer frames per second
+            if !CGPreflightScreenCaptureAccess() {
+                ScreenGrabber.reportFailureIfNeeded()
             }
-            return
         }
-        guard let image = grabFrame() else {
-            done?(.noMatch)
-            return
-        }
+    }
 
+    /// Manual mode: stitches every frame received since the last pass.
+    private func processPendingFrames() {
+        guard isCapturing, !autoScrolling, !isProcessing, let source = source else { return }
+        let frames = source.drain()
+        guard !frames.isEmpty else { return }
+        process(frames, expectedDelta: nil) { [weak self] _ in
+            // Frames that arrived meanwhile
+            self?.processPendingFrames()
+        }
+    }
+
+    private func process(_ frames: [CGImage], expectedDelta: Int?, done: ((ScrollStitcher.AddResult) -> Void)?) {
         isProcessing = true
         workQueue.async { [weak self] in
             guard let self = self else { return }
-            let result = self.stitcher.add(image, expectedDelta: expectedDelta)
+            let result = self.stitcher.addBatch(frames, expectedDelta: expectedDelta)
             let height = self.stitcher.totalHeight
             var preview: CGImage?
-            switch result {
-            case .first, .appended:
+            if result.grew, Date().timeIntervalSince(self.lastPreviewTime) >= self.previewInterval {
                 preview = self.stitcher.compose(maxWidth: 340)
-            default:
-                break
+                self.lastPreviewTime = Date()
             }
             DispatchQueue.main.async {
                 self.isProcessing = false
@@ -142,6 +141,10 @@ class ScrollCapture {
                 done?(result)
             }
         }
+    }
+
+    private var normalStatus: String {
+        autoScrolling ? "Auto-scroll en cours…" : "Capture en cours, continue de défiler"
     }
 
     private func handle(result: ScrollStitcher.AddResult, height: Int, preview: CGImage?) {
@@ -153,10 +156,19 @@ class ScrollCapture {
 
         switch result {
         case .noMatch where !autoScrolling:
-            showWarning("Trop rapide : remonte un peu, puis défile plus doucement")
+            recovering = true
+            showWarning("Trop rapide : remonte un peu, la capture reprendra toute seule")
+        case .repositioned where !autoScrolling:
+            warningResetWork?.cancel()
+            recovering = true
+            hudView?.setStatus("Zone déjà capturée : redescends pour continuer", warning: false)
         case .appended:
-            if hudView?.isShowingWarning != true {
-                hudView?.setStatus(autoScrolling ? "Auto-scroll en cours…" : "Capture en cours, continue de défiler", warning: false)
+            warningResetWork?.cancel()
+            if recovering {
+                recovering = false
+                hudView?.setStatus("C'est reparti, continue de défiler", warning: false)
+            } else if hudView?.isShowingWarning == true || hudView?.statusText != normalStatus {
+                hudView?.setStatus(normalStatus, warning: false)
             }
         default:
             break
@@ -173,10 +185,10 @@ class ScrollCapture {
         warningResetWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self, self.isCapturing else { return }
-            self.hudView?.setStatus(self.autoScrolling ? "Auto-scroll en cours…" : "Capture en cours, continue de défiler", warning: false)
+            self.hudView?.setStatus(self.autoScrolling ? "Auto-scroll en cours…" : "Remonte un peu pour reprendre la capture", warning: !self.autoScrolling)
         }
         warningResetWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
     }
 
     // MARK: - Auto-scroll
@@ -187,6 +199,7 @@ class ScrollCapture {
             autoScrolling = false
             hudView?.setAuto(false)
             hudView?.setStatus("Auto-scroll en pause", warning: false)
+            processPendingFrames()
             return
         }
 
@@ -200,6 +213,7 @@ class ScrollCapture {
         autoScrolling = true
         autoUnchangedCount = 0
         autoNoMatchCount = 0
+        recovering = false
         hudView?.setAuto(true)
         hudView?.setStatus("Auto-scroll en cours…", warning: false)
 
@@ -222,7 +236,7 @@ class ScrollCapture {
         DispatchQueue.main.asyncAfter(deadline: .now() + autoSettleDelay) { [weak self] in
             guard let self = self, self.isCapturing, self.autoScrolling else { return }
             let expected = Int((CGFloat(amount) * self.pixelScale).rounded())
-            self.captureAndProcess(expectedDelta: expected) { [weak self] result in
+            self.autoProcess(expectedDelta: expected) { [weak self] result in
                 guard let self = self, self.isCapturing, self.autoScrolling else { return }
                 switch result {
                 case .unchanged:
@@ -249,6 +263,26 @@ class ScrollCapture {
         }
     }
 
+    private func autoProcess(expectedDelta: Int, done: @escaping (ScrollStitcher.AddResult) -> Void) {
+        guard isCapturing, let source = source else { return }
+        if isProcessing {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.autoProcess(expectedDelta: expectedDelta, done: done)
+            }
+            return
+        }
+        var frames = source.drain()
+        if frames.isEmpty, let latest = source.latestFrame {
+            // The stream only sends frames when something changes: nothing new means nothing moved
+            frames = [latest]
+        }
+        guard !frames.isEmpty else {
+            done(.noMatch)
+            return
+        }
+        process(frames, expectedDelta: expectedDelta, done: done)
+    }
+
     private func postScroll(points: Int) {
         let location = CGPoint(x: captureRect.midX, y: captureRect.midY)
         guard let event = CGEvent(
@@ -268,15 +302,20 @@ class ScrollCapture {
 
     private func finishCapture() {
         guard isCapturing else { return }
-        let finalFrame = grabFrame()
         isCapturing = false
         autoScrolling = false
+        let source = self.source
+        self.source = nil
+        source?.stop()
         teardownUI()
 
+        // Serial queue: runs after any batch still being stitched
         workQueue.async { [weak self] in
             guard let self = self else { return }
-            if let frame = finalFrame {
-                _ = self.stitcher.add(frame, expectedDelta: nil)
+            var frames = source?.drain() ?? []
+            if frames.isEmpty, let latest = source?.latestFrame { frames = [latest] }
+            if !frames.isEmpty {
+                _ = self.stitcher.addBatch(frames, expectedDelta: nil)
             }
             let result = self.stitcher.compose(maxWidth: nil)
             self.stitcher.reset()
@@ -306,14 +345,14 @@ class ScrollCapture {
         guard isCapturing else { return }
         isCapturing = false
         autoScrolling = false
+        source?.stop()
+        source = nil
         teardownUI()
         workQueue.async { [weak self] in self?.stitcher.reset() }
         completion?(.failure(CaptureError.cancelled))
     }
 
     private func teardownUI() {
-        manualTimer?.invalidate()
-        manualTimer = nil
         warningResetWork?.cancel()
         warningResetWork = nil
         hudPanel?.orderOut(nil)
@@ -509,6 +548,7 @@ private final class ScrollHUDView: NSView {
     var onDone: (() -> Void)?
     var onCancel: (() -> Void)?
     private(set) var isShowingWarning = false
+    var statusText: String { statusLabel.stringValue }
 
     private let statusIcon = NSImageView()
     private let statusLabel = NSTextField(labelWithString: "")
