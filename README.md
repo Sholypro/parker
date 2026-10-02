@@ -29,7 +29,7 @@ Outil de capture d'écran natif macOS, dans l'esprit de CleanShot X. Basé sur l
 
 Parker existe aussi pour **Windows 10 (version 2004 ou plus récente) et Windows 11**. Chaque release contient `Parker-Windows.zip`.
 
-* **Installation :** télécharger `Parker-Windows.zip` sur [la page des releases](https://github.com/Sholypro/parker/releases/latest), dézipper, ranger `Parker.exe` où tu veux (par exemple `Documents\Parker`) et le lancer. Aucune autorisation à donner.
+* **Installation :** télécharger `Parker-Windows.zip` sur [la page des releases](https://github.com/Sholypro/parker/releases/latest), dézipper et lancer `Parker.exe`. Parker s'installe tout seul (dans `%LOCALAPPDATA%\Programs\Parker`, sans droits admin), ajoute un raccourci au menu Démarrer, affiche un message de confirmation puis démarre. Le fichier téléchargé peut ensuite être supprimé. Désinstallation : Paramètres > Applications > Applications installées > Parker.
 * **Premier lancement :** Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (l'app n'est pas signée par un éditeur payant). Cliquer sur **Informations complémentaires**, puis **Exécuter quand même**.
 * **Utilisation :** Parker vit dans la zone de notification (à côté de l'horloge, parfois derrière la petite flèche ^). Clic sur l'icône = menu.
 * **Raccourcis :** `Ctrl+Maj+4` zone · `Ctrl+Maj+3` écran · `Ctrl+Maj+5` fenêtre · `Ctrl+Maj+6` capture défilante · `Ctrl+Maj+7` épingler la dernière capture.
@@ -92,7 +92,7 @@ Le profil `⌘⇧` (comme macOS) est disponible dans les Réglages. Désactive a
 * Clic = ouvre l'annotation. **Glisser** la vignette = dépose le fichier dans n'importe quelle app (Slack, Figma, Mail…), la vignette disparaît ensuite.
 * Clic droit : menu complet (Enregistrer sous…, Tout fermer…). Swipe horizontal à deux doigts = fermer.
 * Les captures longues affichent leur partie haute au lieu d'une miniature illisible.
-* Survol = le minuteur de fermeture se met en pause. Position et durée réglables dans les Réglages.
+* Les vignettes **restent affichées** jusqu'à ce que tu les fermes (ou qu'une 7e capture pousse la plus ancienne). Masquage automatique activable dans les Réglages, avec la position.
 
 ### 3. Éditeur d'annotations
 * Outils : sélection, flèche (effilée façon CleanShot), rectangle, ellipse, ligne, texte, crayon, surligneur, **compteur**, **flou** (gaussien), **pixellisation**, **spotlight** (assombrit tout sauf la zone), recadrage.

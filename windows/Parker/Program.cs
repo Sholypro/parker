@@ -15,15 +15,24 @@ namespace Parker
         [STAThread]
         static void Main(string[] args)
         {
+#if !MONO_CHECK
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+#endif
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            if (args.Contains("--uninstall")) { Installer.Uninstall(); return; }
+            if (!Installer.IsInstalledCopy)
+            {
+                // Launched from Downloads (or anywhere else): install properly, then hand over
+                if (!args.Contains("--portable") && Installer.InstallFromDownload()) return;
+            }
+            else Installer.RefreshRegistration();
+
             bool created;
             using (var mutex = new Mutex(true, "Parker-SholyDesign-SingleInstance", out created))
             {
                 if (!created) return; // already running: the tray icon is there
-#if !MONO_CHECK
-                Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-#endif
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new TrayApp(args.Contains("--startup")));
                 GC.KeepAlive(mutex);
             }

@@ -48,6 +48,7 @@ struct PreferencesView: View {
     @AppStorage("playSound") private var playSound: Bool = true
     @AppStorage("includeWindowShadow") private var includeWindowShadow: Bool = true
     @AppStorage("thumbnailDuration") private var thumbnailDuration: Double = 5.0
+    @AppStorage("thumbnailAutoHide") private var thumbnailAutoHide: Bool = false
     @AppStorage("captureDelay") private var captureDelay: Int = 0
     @AppStorage("hideDesktopIcons") private var hideDesktopIcons: Bool = false
     @AppStorage("thumbnailPosition") private var thumbnailPosition: String = "bottomLeft"
@@ -281,14 +282,16 @@ struct PreferencesView: View {
     private var advancedTab: some View {
         Form {
             Section {
+                Toggle("Masquer automatiquement les vignettes", isOn: $thumbnailAutoHide)
                 HStack {
-                    Text("Auto-dismiss after")
+                    Text("Masquer après")
                     Slider(value: $thumbnailDuration, in: 1...15, step: 0.5)
                     Text("\(String(format: "%.1f", thumbnailDuration))s")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .frame(width: 40, alignment: .trailing)
                 }
+                .disabled(!thumbnailAutoHide)
             } header: {
                 Text("Floating Thumbnail")
             }
@@ -336,7 +339,7 @@ struct PreferencesView: View {
 
     private func resetAll() {
         let defaults = UserDefaults.standard
-        for key in ["saveLocation", "imageFormat", "jpegQuality", "copyToClipboard", "showThumbnail", "playSound", "includeWindowShadow", "thumbnailDuration", "captureDelay", "hideDesktopIcons", "thumbnailPosition", "freezeScreen", "gifMaxWidth", "gifFrameRate", "shortcutProfile", "recentCaptures"] {
+        for key in ["saveLocation", "imageFormat", "jpegQuality", "copyToClipboard", "showThumbnail", "playSound", "includeWindowShadow", "thumbnailDuration", "thumbnailAutoHide", "captureDelay", "hideDesktopIcons", "thumbnailPosition", "freezeScreen", "gifMaxWidth", "gifFrameRate", "shortcutProfile", "recentCaptures"] {
             defaults.removeObject(forKey: key)
         }
         postShortcutConfigurationDidChange()

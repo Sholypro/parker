@@ -45,7 +45,7 @@ namespace Parker
             if (cards.Count == 0) return;
             var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
             var s = Dpi.ForRect(screen);
-            var pad = (int)(16 * s); var gap = (int)(10 * s);
+            var pad = (int)(14 * s); var gap = (int)(10 * s);
             var y = screen.Bottom - pad;
             for (var i = cards.Count - 1; i >= 0; i--)
             {
@@ -91,9 +91,9 @@ namespace Parker
             using (var full = ImageStore.LoadUnlocked(path))
             {
                 if (full == null) return;
-                var w = (int)(232 * scale);
+                var w = (int)(180 * scale);
                 var aspect = (float)full.Height / full.Width;
-                var h = (int)Math.Min(Math.Max(w * aspect, 110 * scale), 250 * scale);
+                var h = (int)Math.Min(Math.Max(w * aspect, 96 * scale), 200 * scale);
                 Size = new Size(w, h);
                 thumb = MakeThumb(full, Size);
             }
@@ -102,7 +102,7 @@ namespace Parker
             LayoutButtons();
 
             dismissTimer.Interval = (int)(Settings.Current.ThumbnailSeconds * 1000);
-            dismissTimer.Tick += (s, e) => { if (!hovering) Dismiss(); };
+            dismissTimer.Tick += (s, e) => { if (!hovering && Settings.Current.ThumbnailAutoHide) Dismiss(); };
             animTimer.Tick += (s, e) => AnimTick();
         }
 
@@ -129,7 +129,7 @@ namespace Parker
             var compact = Height < 130 * s;
             if (compact)
             {
-                var w = (int)(90 * s);
+                var w = (int)Math.Min(90 * s, (Width - 3 * gap) / 2);
                 buttons["copy"] = new Rectangle(Width / 2 - w - gap / 2, Height / 2 - pillH / 2, w, pillH);
                 buttons["edit"] = new Rectangle(Width / 2 + gap / 2, Height / 2 - pillH / 2, w, pillH);
             }

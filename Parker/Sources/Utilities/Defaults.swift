@@ -45,6 +45,12 @@ class Defaults {
         set { store.set(newValue, forKey: "includeWindowShadow") }
     }
 
+    /// Off by default: previews stay in the corner until closed.
+    var thumbnailAutoHide: Bool {
+        get { store.bool(forKey: "thumbnailAutoHide") }
+        set { store.set(newValue, forKey: "thumbnailAutoHide") }
+    }
+
     var thumbnailDuration: Double {
         get { store.double(forKey: "thumbnailDuration").nonZeroOr(5.0) }
         set { store.set(newValue, forKey: "thumbnailDuration") }

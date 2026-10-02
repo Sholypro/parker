@@ -25,6 +25,7 @@ namespace Parker
         public bool ShowThumbnail = true;
         public string ThumbnailPosition = "bottomLeft"; // bottomLeft | bottomRight
         public double ThumbnailSeconds = 6;
+        public bool ThumbnailAutoHide = false;     // off: previews stay until closed
         public bool PlaySound = true;
         public bool LaunchAtStartup = true;
         public string SkippedVersion = "";
@@ -60,6 +61,7 @@ namespace Parker
                         case "ShowThumbnail": s.ShowThumbnail = val == "1"; break;
                         case "ThumbnailPosition": s.ThumbnailPosition = val == "bottomRight" ? "bottomRight" : "bottomLeft"; break;
                         case "ThumbnailSeconds": double.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out s.ThumbnailSeconds); break;
+                        case "ThumbnailAutoHide": s.ThumbnailAutoHide = val == "1"; break;
                         case "PlaySound": s.PlaySound = val == "1"; break;
                         case "LaunchAtStartup": s.LaunchAtStartup = val == "1"; break;
                         case "SkippedVersion": s.SkippedVersion = val; break;
@@ -92,6 +94,7 @@ namespace Parker
                     "ShowThumbnail=" + (ShowThumbnail ? 1 : 0),
                     "ThumbnailPosition=" + ThumbnailPosition,
                     "ThumbnailSeconds=" + ThumbnailSeconds.ToString(CultureInfo.InvariantCulture),
+                    "ThumbnailAutoHide=" + (ThumbnailAutoHide ? 1 : 0),
                     "PlaySound=" + (PlaySound ? 1 : 0),
                     "LaunchAtStartup=" + (LaunchAtStartup ? 1 : 0),
                     "SkippedVersion=" + SkippedVersion,

@@ -26,10 +26,10 @@ final class FloatingThumbnailController {
     var onEdit: ((URL) -> Void)?
     var onPin: ((URL) -> Void)?
 
-    private let cardWidth: CGFloat = 232
-    private let minCardHeight: CGFloat = 110
-    private let maxCardHeight: CGFloat = 250
-    private let padding: CGFloat = 18
+    private let cardWidth: CGFloat = 180
+    private let minCardHeight: CGFloat = 96
+    private let maxCardHeight: CGFloat = 200
+    private let padding: CGFloat = 14
     private let stackSpacing: CGFloat = 10
     private let maxEntries = 6
 
@@ -182,6 +182,8 @@ final class FloatingThumbnailController {
     private func scheduleAutoDismiss(_ entry: Entry) {
         entry.timer?.invalidate()
         entry.timer = nil
+        // By default the previews stay until closed (or replaced by newer ones)
+        guard Defaults.shared.thumbnailAutoHide else { return }
         let duration = Defaults.shared.thumbnailDuration
         guard duration > 0, duration < 3600 else { return }  // very long = keep until closed
         entry.timer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self, weak entry] _ in
@@ -442,7 +444,7 @@ class ThumbnailView: NSView, NSDraggingSource {
         let compact = bounds.height < 130
         if compact {
             // Side by side when the card is short
-            let w: CGFloat = 92
+            let w: CGFloat = min(92, (bounds.width - 3 * gap) / 2)
             let left = makePill(title: firstTitle, action: #selector(copyClicked))
             left.frame = NSRect(x: bounds.midX - w - gap / 2, y: centerY - pillH / 2, width: w, height: pillH)
             let right = makePill(title: secondTitle, action: isVideo ? #selector(openClicked) : #selector(editClicked))

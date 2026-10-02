@@ -14,6 +14,7 @@ namespace Parker
         readonly CheckBox thumb = new CheckBox { Text = "Afficher les vignettes flottantes", AutoSize = true };
         readonly ComboBox position = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
         readonly NumericUpDown seconds = new NumericUpDown { Minimum = 2, Maximum = 60, Width = 60 };
+        readonly CheckBox autoHide = new CheckBox { Text = "Masquer automatiquement les vignettes", AutoSize = true };
         readonly CheckBox sound = new CheckBox { Text = "Son de capture", AutoSize = true };
         readonly CheckBox startup = new CheckBox { Text = "Lancer Parker au démarrage de Windows", AutoSize = true };
 
@@ -40,6 +41,9 @@ namespace Parker
             position.Items.AddRange(new object[] { "En bas à gauche", "En bas à droite" });
             position.SelectedIndex = s.ThumbnailPosition == "bottomRight" ? 1 : 0;
             seconds.Value = (decimal)Math.Max(2, Math.Min(60, s.ThumbnailSeconds));
+            autoHide.Checked = s.ThumbnailAutoHide;
+            seconds.Enabled = autoHide.Checked;
+            autoHide.CheckedChanged += (o, e) => seconds.Enabled = autoHide.Checked;
             sound.Checked = s.PlaySound;
             startup.Checked = s.LaunchAtStartup;
 
@@ -67,7 +71,8 @@ namespace Parker
             row("", sound);
             row("", thumb);
             row("Position des vignettes", position);
-            row("Durée d'affichage (s)", seconds);
+            row("", autoHide);
+            row("Masquer après (s)", seconds);
             row("", startup);
             row("Raccourcis", new Label { Text = hotkeysText, AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, 8, 0, 4) });
 
@@ -95,6 +100,7 @@ namespace Parker
             s.ShowThumbnail = thumb.Checked;
             s.ThumbnailPosition = position.SelectedIndex == 1 ? "bottomRight" : "bottomLeft";
             s.ThumbnailSeconds = (double)seconds.Value;
+            s.ThumbnailAutoHide = autoHide.Checked;
             s.PlaySound = sound.Checked;
             s.LaunchAtStartup = startup.Checked;
             s.Save();
@@ -106,14 +112,15 @@ namespace Parker
     {
         const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
-        public static void Apply(bool enabled)
+        public static void Apply(bool enabled, string exe = null)
         {
+            exe = exe ?? Application.ExecutablePath;
             try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))
                 {
                     if (key == null) return;
-                    if (enabled) key.SetValue("Parker", "\"" + Application.ExecutablePath + "\" --startup");
+                    if (enabled) key.SetValue("Parker", "\"" + exe + "\" --startup");
                     else if (key.GetValue("Parker") != null) key.DeleteValue("Parker");
                 }
             }
