@@ -334,8 +334,18 @@ struct GeneralSettingsPage: View {
     }
 
     private var folderDescription: String {
-        let name = FileManager.default.displayName(atPath: saveLocationPath)
-        return "\(name) · dossier local"
+        let path = URL(fileURLWithPath: saveLocationPath).standardizedFileURL.path
+        let known: [(FileManager.SearchPathDirectory, String)] = [
+            (.desktopDirectory, "Bureau"), (.documentDirectory, "Documents"),
+            (.downloadsDirectory, "Téléchargements"), (.picturesDirectory, "Images"), (.moviesDirectory, "Vidéos")
+        ]
+        for (directory, name) in known {
+            if let url = FileManager.default.urls(for: directory, in: .userDomainMask).first,
+               url.standardizedFileURL.path == path {
+                return "\(name) · dossier local"
+            }
+        }
+        return "\(FileManager.default.displayName(atPath: path)) · dossier local"
     }
 
     private var formatDescription: String {
