@@ -109,3 +109,22 @@ jobs:
         with:
           tag_name: v${{ needs.build.outputs.version }}
           files: Parker-Windows.zip
+
+  # Copie de l'archive Mac sous le nom Parker-Mac.zip, publiée en dernier : les versions Mac
+  # jusqu'à 2.1 prennent la première archive .zip de la release, qui doit donc être celle du Mac.
+  mac-alias:
+    needs: [build, windows]
+    if: needs.build.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publier Parker-Mac.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ needs.build.outputs.version }}"
+          gh release download "$tag" -R "${{ github.repository }}" -p Parker.zip
+          mv Parker.zip Parker-Mac.zip
+          gh release upload "$tag" Parker-Mac.zip -R "${{ github.repository }}" --clobber
+          gh api "repos/${{ github.repository }}/releases/tags/$tag" --jq '.assets[].name'

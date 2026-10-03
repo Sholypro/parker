@@ -121,7 +121,14 @@ final class UpdateChecker {
 
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            guard let asset = release.assets.first(where: { $0.name.lowercased().hasSuffix(".zip") }) else {
+            // The release also carries the Windows build: take the Mac archive explicitly
+            let names = release.assets.map { $0.name.lowercased() }
+            let preferred = ["parker-mac.zip", "parker.zip"].first(where: { names.contains($0) })
+            let fallback = release.assets.first(where: {
+                let n = $0.name.lowercased()
+                return n.hasSuffix(".zip") && !n.contains("windows")
+            })
+            guard let asset = release.assets.first(where: { $0.name.lowercased() == preferred }) ?? fallback else {
                 NSWorkspace.shared.open(release.html_url)
                 return
             }
