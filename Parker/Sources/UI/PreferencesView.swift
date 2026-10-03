@@ -117,7 +117,16 @@ final class SettingsNavigation: ObservableObject {
 }
 
 struct SettingsRootView: View {
-    @StateObject private var navigation = SettingsNavigation()
+    @StateObject private var navigation: SettingsNavigation
+    /// Static rendering (no scroll view) for `Parker --render-settings`.
+    var snapshot = false
+
+    init(initial: SettingsSection = .general, snapshot: Bool = false) {
+        let navigation = SettingsNavigation()
+        navigation.section = initial
+        _navigation = StateObject(wrappedValue: navigation)
+        self.snapshot = snapshot
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -126,23 +135,49 @@ struct SettingsRootView: View {
                 .frame(maxHeight: .infinity)
                 .background(SettingsColor.sidebarFill)
 
-            ScrollView(.vertical, showsIndicators: true) {
-                Group {
-                    switch navigation.section {
-                    case .general: GeneralSettingsPage()
-                    case .capture: CaptureSettingsPage()
-                    case .shortcuts: ShortcutSettingsPage()
-                    case .export: ExportSettingsPage()
-                    }
-                }
-                .frame(width: SettingsMetrics.contentWidth, alignment: .leading)
-                .padding(36)
+            if snapshot {
+                page.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                ScrollView(.vertical, showsIndicators: true) { page }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .background(SettingsColor.windowTint)
         .foregroundColor(SettingsColor.ink)
         .ignoresSafeArea()
+    }
+
+    private var page: some View {
+        Group {
+            switch navigation.section {
+            case .general: GeneralSettingsPage()
+            case .capture: CaptureSettingsPage()
+            case .shortcuts: ShortcutSettingsPage()
+            case .export: ExportSettingsPage()
+            }
+        }
+        .frame(width: SettingsMetrics.contentWidth, alignment: .leading)
+        .padding(36)
+    }
+}
+
+/// `Parker --render-settings <folder>`: writes one PNG per settings page (design review).
+enum SettingsSnapshot {
+    @MainActor
+    static func render(to folder: String) {
+        try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        for section in SettingsSection.allCases {
+            let view = SettingsRootView(initial: section, snapshot: true)
+                .frame(width: SettingsMetrics.windowWidth, height: 980)
+                .background(Color(red: 0.10, green: 0.12, blue: 0.17))
+                .environment(\.colorScheme, .dark)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 1
+            guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:]) else { continue }
+            try? png.write(to: URL(fileURLWithPath: folder).appendingPathComponent("\(section.rawValue).png"))
+        }
     }
 }
 

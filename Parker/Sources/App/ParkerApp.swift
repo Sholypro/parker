@@ -4,6 +4,12 @@ import SwiftUI
 @main
 struct ParkerApp {
     static func main() {
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--render-settings"), i + 1 < args.count {
+            _ = NSApplication.shared
+            MainActor.assumeIsolated { SettingsSnapshot.render(to: args[i + 1]) }
+            return
+        }
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let delegate = AppDelegate()
