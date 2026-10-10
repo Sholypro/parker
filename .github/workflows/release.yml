@@ -106,7 +106,13 @@ jobs:
           SC_HARDENED: ${{ steps.sign.outputs.hardened }}
         run: |
           chmod +x build-app.sh
-          ./build-app.sh --no-install
+          if ! ./build-app.sh --no-install > build.log 2>&1; then
+            cat build.log
+            # Visible dans le résumé de l'exécution (les journaux ne sont pas toujours accessibles)
+            tail -15 build.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          tail -5 build.log
           codesign -dv --verbose=2 dist/Parker.app 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|Runtime|flags" || true
 
       - name: Notariser l'app
