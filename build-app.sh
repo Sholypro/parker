@@ -46,7 +46,7 @@ if [[ -z "$IDENTITY" ]]; then
   IDENTITY="$(security find-identity -p codesigning 2>/dev/null | grep '"Parker Local"' | head -1 | awk '{print $2}' || true)"
 fi
 if [[ -n "$IDENTITY" ]]; then
-  echo "→ Signature avec le certificat $IDENTITY…"
+  echo "→ Signature avec le certificat ${IDENTITY}…"
 else
   IDENTITY="-"
   echo "→ Signature ad hoc (lance ./scripts/setup-signing.sh pour garder les autorisations entre les versions)…"
