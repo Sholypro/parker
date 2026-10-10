@@ -109,7 +109,7 @@ jobs:
           if ! ./build-app.sh --no-install > build.log 2>&1; then
             cat build.log
             # Visible dans le résumé de l'exécution (les journaux ne sont pas toujours accessibles)
-            tail -15 build.log | while IFS= read -r line; do echo "::error::$line"; done
+            { grep -n -i -E "error|fatal|failed" build.log | head -20; tail -3 build.log; } | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
           tail -5 build.log
