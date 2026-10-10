@@ -1,53 +1,55 @@
 # Parker
 
-Outil de capture d'écran natif macOS, dans l'esprit de CleanShot X. Basé sur le projet open source [ScreenCap](https://github.com/8tp/ScreenCap) (licence MIT), retravaillé sur trois points : la capture défilante, l'éditeur d'annotations et les vignettes flottantes en bas à gauche.
+Outil de capture d'écran pour Mac et Windows, dans l'esprit de CleanShot X. Basé sur le projet open source [ScreenCap](https://github.com/8tp/ScreenCap) (licence MIT), retravaillé sur trois points : la capture défilante, l'éditeur d'annotations et les vignettes flottantes en bas à gauche.
 
-## Installation (5 minutes)
+## Télécharger
 
-**Prérequis :** macOS 14 (Sonoma) ou plus récent, et les outils développeur Apple.
+| | Fichier | Installation |
+|---|---|---|
+| **Mac** (macOS 14 ou plus récent) | **[Parker.dmg](https://github.com/Sholypro/parker/releases/latest/download/Parker.dmg)** | Ouvrir le .dmg, glisser Parker dans Applications |
+| **Windows** (10 version 2004 ou plus récent, 11) | **[Parker-Setup.exe](https://github.com/Sholypro/parker/releases/latest/download/Parker-Setup.exe)** | Lancer le fichier : Parker s'installe tout seul |
 
-1. Ouvre le Terminal et installe les outils Apple si ce n'est pas déjà fait :
-   ```bash
-   xcode-select --install
-   ```
-2. Dézippe le dossier, place-toi dedans, puis lance :
-   ```bash
-   cd ~/Downloads/Parker
-   ./build-app.sh
-   ```
-   Le script compile, crée `Parker.app`, l'installe dans `/Applications` et la lance. L'icône apparaît dans la barre des menus.
-3. Au premier lancement, autorise Parker dans **Réglages Système > Confidentialité et sécurité** :
-   * **Enregistrement de l'écran** : obligatoire pour capturer.
-   * **Accessibilité** : pour l'auto-scroll de la capture défilante et la touche Esc pendant le scroll.
+Ces liens pointent toujours vers la dernière version. Toutes les versions : [page des releases](https://github.com/Sholypro/parker/releases).
 
-   Après avoir coché les cases, quitte puis relance Parker.
+### Premier lancement : l'alerte de sécurité est normale
+
+Parker n'est pas encore signé par un éditeur certifié (certificats payants, voir [docs/SIGNATURE.md](docs/SIGNATURE.md)). Le système demande donc une confirmation **une seule fois** :
+
+* **Mac**, message « Apple n'a pas pu confirmer que « Parker » ne contenait pas de logiciel malveillant » :
+  1. Cliquer sur **Terminé** (surtout pas « Placer dans la corbeille »).
+  2. Ouvrir **Réglages Système > Confidentialité et sécurité**.
+  3. Tout en bas, à côté de « Parker a été bloqué », cliquer sur **Ouvrir quand même**, puis confirmer.
+* **Windows**, message « Windows a protégé votre ordinateur » : cliquer sur **Informations complémentaires**, puis **Exécuter quand même**.
+
+Ensuite, Parker demande deux autorisations sur Mac (**Enregistrement de l'écran** et **Accessibilité**) avec une fenêtre d'aide qui guide pas à pas. Sur Windows, aucune autorisation n'est nécessaire.
+
+### Mises à jour
+
+Automatiques sur Mac et Windows : Parker vérifie au lancement (au plus une fois toutes les 6 h), ou via le menu **Rechercher des mises à jour…**. Les mises à jour ne redemandent pas l'étape de sécurité.
+
+## Version Windows
+
+* **Installation :** `Parker-Setup.exe` s'installe dans `%LOCALAPPDATA%\Programs\Parker` (sans droits admin), ajoute un raccourci au menu Démarrer, affiche un message de confirmation puis démarre. Le fichier téléchargé peut ensuite être supprimé. Désinstallation : Paramètres > Applications > Applications installées > Parker.
+* **Utilisation :** Parker vit dans la zone de notification (à côté de l'horloge, parfois derrière la petite flèche ^). Clic sur l'icône = menu.
+* **Raccourcis :** `Ctrl+Maj+4` zone · `Ctrl+Maj+3` écran · `Ctrl+Maj+5` fenêtre · `Ctrl+Maj+6` capture défilante · `Ctrl+Maj+7` épingler la dernière capture.
+* **Captures :** enregistrées dans `Images\Parker` (modifiable dans les Réglages), et copiées dans le presse-papiers.
+* **Code :** dossier `windows/` (C# .NET 8, WinForms), compilé par GitHub à chaque version.
+
+## Compiler soi-même (Mac)
+
+**Prérequis :** macOS 14 ou plus récent et les outils développeur Apple (`xcode-select --install`).
+
+```bash
+./build-app.sh
+```
+Le script compile, crée `Parker.app`, l'installe dans `/Applications` et la lance.
 
 > **Astuce (évite de redonner les autorisations à chaque recompilation)**
 > Lance une fois `./scripts/setup-signing.sh` (voir plus bas). Le script de build utilise ensuite automatiquement ce certificat.
 
-## Version Windows
+## Publier une version
 
-Parker existe aussi pour **Windows 10 (version 2004 ou plus récente) et Windows 11**. Chaque release contient `Parker-Windows.zip`.
-
-* **Installation :** télécharger `Parker-Windows.zip` sur [la page des releases](https://github.com/Sholypro/parker/releases/latest), dézipper et lancer `Parker.exe`. Parker s'installe tout seul (dans `%LOCALAPPDATA%\Programs\Parker`, sans droits admin), ajoute un raccourci au menu Démarrer, affiche un message de confirmation puis démarre. Le fichier téléchargé peut ensuite être supprimé. Désinstallation : Paramètres > Applications > Applications installées > Parker.
-* **Premier lancement :** Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (l'app n'est pas signée par un éditeur payant). Cliquer sur **Informations complémentaires**, puis **Exécuter quand même**.
-* **Utilisation :** Parker vit dans la zone de notification (à côté de l'horloge, parfois derrière la petite flèche ^). Clic sur l'icône = menu.
-* **Raccourcis :** `Ctrl+Maj+4` zone · `Ctrl+Maj+3` écran · `Ctrl+Maj+5` fenêtre · `Ctrl+Maj+6` capture défilante · `Ctrl+Maj+7` épingler la dernière capture.
-* **Captures :** enregistrées dans `Images\Parker` (modifiable dans les Réglages), et copiées dans le presse-papiers.
-* **Mises à jour :** automatiques, comme sur Mac (menu **Rechercher des mises à jour…**).
-* **Code :** dossier `windows/` (C# .NET 8, WinForms), compilé par GitHub à chaque version.
-
-## Partager avec des collègues + mises à jour automatiques
-
-Le dépôt GitHub sert de « serveur de mises à jour » : chaque version publiée est compilée par GitHub, puis l'app de chacun la propose toute seule (au lancement, au plus une fois toutes les 6 h, ou via le menu **Rechercher des mises à jour…**).
-
-### Pour les collègues (installation, une seule fois)
-1. Ouvrir [github.com/Sholypro/parker/releases](https://github.com/Sholypro/parker/releases) et télécharger `Parker.zip` de la dernière version.
-2. Dézipper et glisser `Parker.app` dans **Applications**.
-3. Premier lancement : macOS bloque l'app (elle n'est pas notarisée par Apple). Aller dans **Réglages Système > Confidentialité et sécurité**, tout en bas : **Ouvrir quand même**.
-4. Autoriser **Enregistrement de l'écran** et **Accessibilité**, puis relancer l'app.
-
-Ensuite, plus rien à faire : les mises à jour s'installent en un clic, sans repasser par l'étape 3.
+Le dépôt GitHub sert de « serveur de mises à jour » : chaque version publiée est compilée par GitHub (Mac et Windows), puis l'app de chacun la propose toute seule.
 
 ### Pour toi (publier une nouvelle version)
 ```bash

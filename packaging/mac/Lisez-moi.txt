@@ -1,0 +1,19 @@
+INSTALLER PARKER
+
+1. Glisse l'icône Parker sur le dossier Applications.
+2. Ouvre Parker depuis le dossier Applications (ou avec Spotlight).
+
+SI MACOS AFFICHE « APPLE N'A PAS PU CONFIRMER QUE PARKER... »
+
+Parker n'est pas encore certifié par Apple (notarisation payante). Le fichier est sain,
+il faut juste l'autoriser une fois :
+
+1. Clique sur « Terminé » (pas sur « Placer dans la corbeille »).
+2. Ouvre Réglages Système > Confidentialité et sécurité.
+3. Tout en bas, à côté de « Parker a été bloqué », clique sur « Ouvrir quand même ».
+4. Confirme avec ton mot de passe ou Touch ID.
+
+C'est à faire une seule fois. Les mises à jour suivantes se font depuis le menu Parker
+(Rechercher des mises à jour…) sans repasser par là.
+
+Code source et versions : https://github.com/Sholypro/parker

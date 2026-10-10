@@ -1,7 +1,23 @@
 # Publie une nouvelle version de Parker.
 # Déclencheur : un push sur main qui change le numéro de version dans Parker/Support/Info.plist
 # (ou un lancement manuel depuis l'onglet Actions).
-# Résultat : une Release GitHub avec Parker.zip, que l'app de chacun détecte toute seule.
+#
+# Fichiers publiés dans la Release :
+#   Parker.dmg           installation Mac (glisser Parker dans Applications)
+#   Parker-Setup.exe     installation Windows (s'installe tout seul au premier lancement)
+#   Parker.zip           archive Mac lue par la mise à jour intégrée
+#   Parker-Mac.zip       copie de Parker.zip pour les versions Mac jusqu'à 2.1
+#   Parker-Windows.zip   archive Windows lue par la mise à jour intégrée
+#
+# Signature (tout est optionnel, la publication marche sans) :
+#   SIGNING_P12_BASE64 / SIGNING_P12_PASSWORD
+#       certificat local "Parker Local" : garde les autorisations macOS d'une version à l'autre.
+#   DEVELOPER_ID_P12_BASE64 / DEVELOPER_ID_P12_PASSWORD + APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD
+#       certificat "Developer ID Application" (compte Apple Developer) + notarisation :
+#       supprime l'alerte « Apple n'a pas pu confirmer… » au premier lancement.
+#   WINDOWS_PFX_BASE64 / WINDOWS_PFX_PASSWORD
+#       certificat de signature de code Windows : affiche l'éditeur au lieu de « Éditeur inconnu ».
+# Voir docs/SIGNATURE.md.
 name: Release
 
 on:
@@ -37,40 +53,130 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Certificat de signature (optionnel)
+      - name: Certificats de signature
         if: steps.version.outputs.skip != 'true'
         id: sign
         env:
-          P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
-          P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+          LOCAL_P12: ${{ secrets.SIGNING_P12_BASE64 }}
+          LOCAL_PASS: ${{ secrets.SIGNING_P12_PASSWORD }}
+          DEVID_P12: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVID_PASS: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          if [ -z "$P12_BASE64" ]; then
-            echo "Pas de secret SIGNING_P12_BASE64 : signature ad hoc."
-            exit 0
-          fi
           KC="$RUNNER_TEMP/signing.keychain-db"
           KCPASS="$(openssl rand -hex 16)"
-          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p "$KCPASS" "$KC"
           security set-keychain-settings -lut 21600 "$KC"
           security unlock-keychain -p "$KCPASS" "$KC"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPASS" "$KC" >/dev/null
+          import() {
+            echo "$1" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$2" -T /usr/bin/codesign
+            rm -f "$RUNNER_TEMP/cert.p12"
+          }
+          if [ -n "$DEVID_P12" ]; then import "$DEVID_P12" "$DEVID_PASS"; fi
+          if [ -n "$LOCAL_P12" ]; then import "$LOCAL_P12" "$LOCAL_PASS"; fi
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPASS" "$KC" >/dev/null 2>&1 || true
           security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
-          HASH="$(security find-identity -p codesigning "$KC" | grep '"Parker Local"' | head -1 | awk '{print $2}')"
-          echo "identity=$HASH" >> "$GITHUB_OUTPUT"
-          rm -f "$RUNNER_TEMP/cert.p12"
 
-      - name: Build
+          DEVID="$(security find-identity -v -p codesigning "$KC" | grep '"Developer ID Application' | head -1 | awk '{print $2}' || true)"
+          LOCAL="$(security find-identity -p codesigning "$KC" | grep '"Parker Local"' | head -1 | awk '{print $2}' || true)"
+          if [ -n "$DEVID" ]; then
+            echo "Signature : Developer ID Application"
+            echo "identity=$DEVID" >> "$GITHUB_OUTPUT"
+            echo "hardened=1" >> "$GITHUB_OUTPUT"
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_PASSWORD" ]; then
+              echo "notarize=1" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::Developer ID présent mais identifiants Apple manquants : pas de notarisation."
+            fi
+          elif [ -n "$LOCAL" ]; then
+            echo "Signature : Parker Local (pas de Developer ID : macOS demandera « Ouvrir quand même » au premier lancement)"
+            echo "identity=$LOCAL" >> "$GITHUB_OUTPUT"
+          else
+            echo "Signature ad hoc"
+          fi
+
+      - name: Compiler Parker.app
         if: steps.version.outputs.skip != 'true'
         env:
           SC_VERSION: ${{ steps.version.outputs.version }}
           SC_SIGN_IDENTITY: ${{ steps.sign.outputs.identity }}
+          SC_HARDENED: ${{ steps.sign.outputs.hardened }}
         run: |
           chmod +x build-app.sh
           ./build-app.sh --no-install
+          codesign -dv --verbose=2 dist/Parker.app 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|Runtime|flags" || true
+
+      - name: Notariser l'app
+        if: steps.version.outputs.skip != 'true' && steps.sign.outputs.notarize == '1'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent dist/Parker.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple dist/Parker.app
+          spctl -a -vv dist/Parker.app
+
+      - name: Créer Parker.dmg et les archives
+        if: steps.version.outputs.skip != 'true'
+        env:
+          SC_SIGN_IDENTITY: ${{ steps.sign.outputs.identity }}
+          NOTARIZE: ${{ steps.sign.outputs.notarize }}
+        run: |
+          STAGE="$RUNNER_TEMP/dmg"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          ditto dist/Parker.app "$STAGE/Parker.app"
+          ln -s /Applications "$STAGE/Applications"
+          if [ "$NOTARIZE" != "1" ]; then
+            cp packaging/mac/Lisez-moi.txt "$STAGE/Lisez-moi.txt"
+          fi
+          hdiutil create -volname "Parker" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov Parker.dmg
+          if [ -n "$SC_SIGN_IDENTITY" ]; then
+            codesign --force --timestamp --sign "$SC_SIGN_IDENTITY" Parker.dmg || codesign --force --sign "$SC_SIGN_IDENTITY" Parker.dmg
+          fi
+          hdiutil verify Parker.dmg
           ditto -c -k --keepParent dist/Parker.app Parker.zip
-          codesign -dv dist/Parker.app 2>&1 | grep -E "Authority|Signature" || true
+          ls -la Parker.dmg Parker.zip
+
+      - name: Notariser le DMG
+        if: steps.version.outputs.skip != 'true' && steps.sign.outputs.notarize == '1'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool submit Parker.dmg --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple Parker.dmg
+
+      - name: Notes de version
+        if: steps.version.outputs.skip != 'true'
+        env:
+          V: ${{ steps.version.outputs.version }}
+          NOTARIZE: ${{ steps.sign.outputs.notarize }}
+        run: |
+          {
+            echo "## Télécharger Parker $V"
+            echo
+            echo "- **Mac** (macOS 14 ou plus récent) : [Parker.dmg](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker.dmg) : ouvrir, puis glisser Parker dans Applications."
+            echo "- **Windows** (10 version 2004 ou plus récent, 11) : [Parker-Setup.exe](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Setup.exe) : lancer, Parker s'installe tout seul."
+            echo
+            echo "Déjà installé ? Menu Parker > **Rechercher des mises à jour…**"
+            echo
+            if [ "$NOTARIZE" != "1" ]; then
+              echo "### Premier lancement"
+              echo "- **Mac** : si macOS affiche « Apple n'a pas pu confirmer… », cliquer sur **Terminé**, puis **Réglages Système > Confidentialité et sécurité**, tout en bas : **Ouvrir quand même**."
+              echo "- **Windows** : si SmartScreen affiche « Windows a protégé votre ordinateur », cliquer sur **Informations complémentaires**, puis **Exécuter quand même**."
+              echo
+            fi
+            echo "Les autres fichiers (.zip) servent à la mise à jour automatique."
+          } > release-notes.md
+          cat release-notes.md
 
       - name: Publier la release
         if: steps.version.outputs.skip != 'true'
@@ -79,8 +185,10 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           name: Parker ${{ steps.version.outputs.version }}
-          files: Parker.zip
-          generate_release_notes: true
+          body_path: release-notes.md
+          files: |
+            Parker.dmg
+            Parker.zip
 
   windows:
     needs: build
@@ -93,7 +201,7 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Build Parker.exe
+      - name: Compiler Parker.exe
         shell: pwsh
         run: |
           $v = "${{ needs.build.outputs.version }}"
@@ -101,14 +209,37 @@ jobs:
           dotnet publish windows/Parker/Parker.csproj -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
             -p:Version=$v -o out
+          (Get-Item out/Parker.exe).VersionInfo | Format-List ProductName, FileDescription, CompanyName, ProductVersion, FileVersion
+
+      - name: Signer Parker.exe (optionnel)
+        shell: pwsh
+        env:
+          PFX: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          if (-not $env:PFX) { Write-Host "Pas de certificat Windows : exécutable non signé."; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          & $signtool.FullName sign /f $pfx /p $env:PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "Parker" out/Parker.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $signtool.FullName verify /pa out/Parker.exe
+          Remove-Item $pfx
+
+      - name: Préparer les fichiers
+        shell: pwsh
+        run: |
+          Copy-Item out/Parker.exe Parker-Setup.exe
           Compress-Archive -Path out/Parker.exe -DestinationPath Parker-Windows.zip
-          Get-Item Parker-Windows.zip | Select-Object Name, Length
+          Get-Item Parker-Setup.exe, Parker-Windows.zip | Select-Object Name, Length
 
       - name: Ajouter à la release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.build.outputs.version }}
-          files: Parker-Windows.zip
+          files: |
+            Parker-Setup.exe
+            Parker-Windows.zip
 
   # Copie de l'archive Mac sous le nom Parker-Mac.zip, publiée en dernier : les versions Mac
   # jusqu'à 2.1 prennent la première archive .zip de la release, qui doit donc être celle du Mac.

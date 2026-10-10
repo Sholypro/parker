@@ -2,7 +2,8 @@
 # Construit Parker.app, la signe et l'installe dans /Applications.
 # Usage :  ./build-app.sh                 build + install + lancement
 #          ./build-app.sh --no-install    build seul (dist/Parker.app), utilisé par GitHub
-# Variables optionnelles : SC_VERSION=1.3 (numéro de version), SC_SIGN_IDENTITY=<hash SHA-1>
+# Variables optionnelles : SC_VERSION=1.3 (numéro de version), SC_SIGN_IDENTITY=<hash SHA-1>,
+#   SC_HARDENED=1 (runtime renforcé + horodatage, obligatoire pour la notarisation Apple)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -45,12 +46,17 @@ if [[ -z "$IDENTITY" ]]; then
   IDENTITY="$(security find-identity -p codesigning 2>/dev/null | grep '"Parker Local"' | head -1 | awk '{print $2}' || true)"
 fi
 if [[ -n "$IDENTITY" ]]; then
-  echo "→ Signature avec le certificat Parker Local…"
+  echo "→ Signature avec le certificat $IDENTITY…"
 else
   IDENTITY="-"
   echo "→ Signature ad hoc (lance ./scripts/setup-signing.sh pour garder les autorisations entre les versions)…"
 fi
-codesign --force --deep --sign "$IDENTITY" "$APP"
+if [[ "${SC_HARDENED:-0}" == "1" && "$IDENTITY" != "-" ]]; then
+  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+else
+  codesign --force --deep --sign "$IDENTITY" "$APP"
+fi
+codesign --verify --strict --verbose=2 "$APP"
 
 if [[ $INSTALL -eq 1 ]]; then
   echo "→ Installation dans /Applications…"
