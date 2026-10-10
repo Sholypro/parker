@@ -21,6 +21,12 @@ Parker n'est pas encore signé par un éditeur certifié (certificats payants, v
   3. Tout en bas, à côté de « Parker a été bloqué », cliquer sur **Ouvrir quand même**, puis confirmer.
 * **Windows**, message « Windows a protégé votre ordinateur » : cliquer sur **Informations complémentaires**, puis **Exécuter quand même**.
 
+**Sur Mac, installation sans alerte (alternative) :** ouvrir l'app Terminal, coller cette ligne puis Entrée. Elle télécharge la dernière version, l'installe dans Applications et la lance :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sholypro/parker/main/install.sh | bash
+```
+
 Ensuite, Parker demande deux autorisations sur Mac (**Enregistrement de l'écran** et **Accessibilité**) avec une fenêtre d'aide qui guide pas à pas. Sur Windows, aucune autorisation n'est nécessaire.
 
 ### Mises à jour

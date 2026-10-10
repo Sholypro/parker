@@ -33,10 +33,14 @@ Coût : abonnement Apple Developer Program, 99 $ par an (tarif affiché par Appl
 
 ## Windows : certificat de signature de code (affiche l'éditeur)
 
-Deux options, à comparer au moment de l'achat (prix et conditions changent souvent) :
+Options vérifiées en octobre 2026 sur la page Microsoft « Code signing options for Windows app developers » (prix et conditions changent souvent) :
 
-* **Azure Artifact Signing** (ex Trusted Signing, Microsoft) : abonnement mensuel. La disponibilité pour les particuliers dépend du pays : à vérifier pour la France.
-* **Certificat de signature de code (OV)** d'une autorité de certification (DigiCert, Sectigo, Certum…) : abonnement annuel. Depuis 2023, la clé est livrée sur un support matériel ou dans un HSM cloud, ce qui demande d'adapter l'étape de signature.
+* **Azure Artifact Signing** (ex Trusted Signing), environ 9,99 $ par mois : **réservé aux particuliers des États-Unis et du Canada**. Pas accessible depuis la France en tant que particulier (possible pour une entreprise, après validation).
+* **Certificat OV** d'une autorité (DigiCert, Sectigo, Certum…), environ 150 à 300 $ par an : disponible partout. Depuis 2023, la clé est sur un support matériel ou un HSM cloud, ce qui demande d'adapter l'étape de signature.
+* **SignPath Foundation** : gratuit pour les projets open source, sur dossier. Conditions principales : licence open source (OSI) pour tout le code, compilation vérifiable depuis le dépôt, validation manuelle de chaque version, double authentification, page « Code signing policy » dans le README.
+* **Microsoft Store** : gratuit, Microsoft signe lui-même l'app (plus d'alerte SmartScreen), mais il faut empaqueter Parker en MSIX et passer la validation du Store.
+
+Un certificat EV ne supprime plus l'alerte SmartScreen d'office depuis 2024 : inutile de payer plus cher pour ça.
 
 Le workflow sait déjà signer avec un certificat `.pfx` exportable :
 
