@@ -6,7 +6,8 @@ Outil de capture d'écran pour Mac et Windows, dans l'esprit de CleanShot X. Bas
 
 | | Fichier | Installation |
 |---|---|---|
-| **Mac** (macOS 14 ou plus récent) | **[Parker.dmg](https://github.com/Sholypro/parker/releases/latest/download/Parker.dmg)** | Ouvrir le .dmg, glisser Parker dans Applications |
+| **Mac** (macOS 14 ou plus récent), **recommandé** | Commande Terminal ci-dessous | Aucune alerte de sécurité |
+| **Mac** (macOS 14 ou plus récent) | **[Parker.dmg](https://github.com/Sholypro/parker/releases/latest/download/Parker.dmg)** | Ouvrir le .dmg, glisser Parker dans Applications, puis « Ouvrir quand même » une fois |
 | **Windows** (10 version 2004 ou plus récent, 11) | **[Parker-Setup.exe](https://github.com/Sholypro/parker/releases/latest/download/Parker-Setup.exe)** | Lancer le fichier : Parker s'installe tout seul |
 
 Ces liens pointent toujours vers la dernière version. Toutes les versions : [page des releases](https://github.com/Sholypro/parker/releases).
@@ -21,7 +22,7 @@ Parker n'est pas encore signé par un éditeur certifié (certificats payants, v
   3. Tout en bas, à côté de « Parker a été bloqué », cliquer sur **Ouvrir quand même**, puis confirmer.
 * **Windows**, message « Windows a protégé votre ordinateur » : cliquer sur **Informations complémentaires**, puis **Exécuter quand même**.
 
-**Sur Mac, installation sans alerte (alternative) :** ouvrir l'app Terminal, coller cette ligne puis Entrée. Elle télécharge la dernière version, l'installe dans Applications et la lance :
+**Sur Mac, installation sans alerte (recommandé) :** ouvrir l'app Terminal, coller cette ligne puis Entrée. Elle télécharge la dernière version, l'installe dans Applications et la lance :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Sholypro/parker/main/install.sh | bash

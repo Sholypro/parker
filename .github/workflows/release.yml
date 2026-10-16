@@ -144,8 +144,10 @@ jobs:
             cp packaging/mac/Lisez-moi.txt "$STAGE/Lisez-moi.txt"
           fi
           hdiutil create -volname "Parker" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov Parker.dmg
-          if [ -n "$SC_SIGN_IDENTITY" ]; then
-            codesign --force --timestamp --sign "$SC_SIGN_IDENTITY" Parker.dmg || codesign --force --sign "$SC_SIGN_IDENTITY" Parker.dmg
+          # Le .dmg n'est signé qu'avec un Developer ID (notarisation) : signé avec un certificat
+          # non reconnu par Apple ("Parker Local"), macOS refuse même d'ouvrir l'image disque.
+          if [ "$NOTARIZE" = "1" ] && [ -n "$SC_SIGN_IDENTITY" ]; then
+            codesign --force --timestamp --sign "$SC_SIGN_IDENTITY" Parker.dmg
           fi
           hdiutil verify Parker.dmg
           ditto -c -k --keepParent dist/Parker.app Parker.zip
@@ -171,6 +173,9 @@ jobs:
           {
             echo "## Télécharger Parker $V"
             echo
+            if [ "$NOTARIZE" != "1" ]; then
+              echo "- **Mac, sans alerte (recommandé)** : ouvrir Terminal, coller \`curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | bash\` puis Entrée."
+            fi
             echo "- **Mac** (macOS 14 ou plus récent) : [Parker.dmg](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker.dmg) : ouvrir, puis glisser Parker dans Applications."
             echo "- **Windows** (10 version 2004 ou plus récent, 11) : [Parker-Setup.exe](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Setup.exe) : lancer, Parker s'installe tout seul."
             echo
