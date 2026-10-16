@@ -1,4 +1,6 @@
 import Cocoa
+import SwiftUI
+import ThinkingOrbsKit
 
 enum ToastStyle {
     case success
@@ -13,40 +15,44 @@ enum ToastStyle {
         }
     }
 
-    var tintColor: NSColor {
+    var tint: Color {
         switch self {
-        case .success: return .systemGreen
-        case .error: return .systemRed
-        case .info: return .systemBlue
+        case .success: return Color(red: 0.30, green: 0.85, blue: 0.48)
+        case .error: return Color(red: 1.0, green: 0.42, blue: 0.40)
+        case .info: return Color(red: 0.55, green: 0.66, blue: 1.0)
         }
     }
 }
 
+/// Small capsule at the bottom of the screen.
+/// `show` displays a result for a few seconds; `showActivity` displays a thinking orb
+/// with a label until the next toast replaces it (use it only for waits of 2 s or more).
 enum Toast {
     private static var toastWindow: NSWindow?
 
     static func show(message: String, style: ToastStyle = .success, duration: TimeInterval = 2.0) {
+        present(AnyView(ResultPill(text: message, symbol: style.icon, tint: style.tint)), duration: duration)
+    }
+
+    static func showActivity(message: String, state: OrbState = .working) {
+        present(AnyView(ActivityPill(text: message, state: state)), duration: nil)
+    }
+
+    private static func present(_ content: AnyView, duration: TimeInterval?) {
         DispatchQueue.main.async {
             toastWindow?.orderOut(nil)
 
             let mouse = NSEvent.mouseLocation
             guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
 
-            let attrs: [NSAttributedString.Key: Any] = [
-                .foregroundColor: NSColor.white,
-                .font: NSFont.systemFont(ofSize: 13, weight: .medium)
-            ]
-            let textSize = (message as NSString).size(withAttributes: attrs)
-            let padding: CGFloat = 32
-            let iconSize: CGFloat = 16
-            let toastWidth = textSize.width + padding * 2 + iconSize + 8
-            let toastHeight: CGFloat = 36
+            let hosting = NSHostingView(rootView: content)
+            let size = hosting.fittingSize
+            hosting.frame = NSRect(origin: .zero, size: size)
 
-            let x = screen.frame.midX - toastWidth / 2
+            let x = screen.frame.midX - size.width / 2
             let y = screen.visibleFrame.minY + 60
-
             let window = NSWindow(
-                contentRect: NSRect(x: x, y: y, width: toastWidth, height: toastHeight),
+                contentRect: NSRect(x: x, y: y, width: size.width, height: size.height),
                 styleMask: .borderless,
                 backing: .buffered,
                 defer: false
@@ -55,46 +61,27 @@ enum Toast {
             window.backgroundColor = .clear
             window.isOpaque = false
             window.hasShadow = true
-
-            let view = NSVisualEffectView(frame: NSRect(origin: .zero, size: NSSize(width: toastWidth, height: toastHeight)))
-            view.blendingMode = .behindWindow
-            view.material = .hudWindow
-            view.state = .active
-            view.wantsLayer = true
-            view.layer?.cornerRadius = toastHeight / 2
-            view.layer?.masksToBounds = true
-
-            // Icon
-            let iconView = NSImageView(frame: NSRect(x: padding - 4, y: (toastHeight - iconSize) / 2, width: iconSize, height: iconSize))
-            iconView.image = NSImage(systemSymbolName: style.icon, accessibilityDescription: nil)
-            iconView.contentTintColor = style.tintColor
-            view.addSubview(iconView)
-
-            let label = NSTextField(labelWithString: message)
-            label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-            label.textColor = .white
-            label.alignment = .natural
-            label.frame = NSRect(x: padding + iconSize + 4, y: (toastHeight - textSize.height) / 2, width: textSize.width + 4, height: textSize.height)
-            view.addSubview(label)
-
-            window.contentView = view
+            window.ignoresMouseEvents = true
+            window.sharingType = .none   // never appears in captures
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+            window.contentView = hosting
             window.alphaValue = 0
-            window.orderFront(nil)
+            window.orderFrontRegardless()
 
             // Slide up + fade in
             let startFrame = window.frame
             window.setFrame(startFrame.offsetBy(dx: 0, dy: -10), display: false)
-
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.25
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 window.animator().alphaValue = 1.0
                 window.animator().setFrame(startFrame, display: true)
             }
-
             toastWindow = window
 
+            guard let duration = duration else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                guard toastWindow === window else { return }
                 NSAnimationContext.runAnimationGroup({ context in
                     context.duration = 0.3
                     context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -102,9 +89,7 @@ enum Toast {
                     window.animator().setFrame(startFrame.offsetBy(dx: 0, dy: -10), display: true)
                 }, completionHandler: {
                     window.orderOut(nil)
-                    if toastWindow === window {
-                        toastWindow = nil
-                    }
+                    if toastWindow === window { toastWindow = nil }
                 })
             }
         }

@@ -1,4 +1,5 @@
 import Cocoa
+import ThinkingOrbsKit
 import AVFoundation
 
 /// CleanShot-style "Quick Access Overlay": a stack of floating previews in a screen corner
@@ -132,7 +133,7 @@ final class FloatingThumbnailController {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
         view.onSaveAsGIF = {
-            Toast.show(message: "Conversion en GIF…", style: .info)
+            Toast.showActivity(message: "Conversion en GIF…", state: .working)
             GIFExporter.exportToGIF(videoURL: url) { result in
                 switch result {
                 case .success(let gifURL):

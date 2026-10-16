@@ -1,4 +1,6 @@
 import SwiftUI
+import BorderBeamKit
+import ThinkingOrbsKit
 import Cocoa
 
 // Settings window, redesigned in Figma (file "Parker", section "Section 1", v2.1):
@@ -177,6 +179,28 @@ enum SettingsSnapshot {
                   let rep = NSBitmapImageRep(data: tiff),
                   let png = rep.representation(using: .png, properties: [:]) else { continue }
             try? png.write(to: URL(fileURLWithPath: folder).appendingPathComponent("\(section.rawValue).png"))
+        }
+        // libraries.dev effects as used in Parker (frozen frames)
+        let effects = VStack(alignment: .leading, spacing: 24) {
+            ActivityPill(text: "Conversion en GIF…", state: .working)
+            ResultPill(text: "GIF enregistré", symbol: "checkmark.circle.fill", tint: .green)
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.85), Color(white: 0.6)], startPoint: .top, endPoint: .bottom)
+                CaptureBeamFrame(area: CGRect(x: 30, y: 30, width: 420, height: 220))
+            }
+            .frame(width: 480, height: 280)
+        }
+        .padding(30)
+        .background(Color(red: 0.10, green: 0.12, blue: 0.17))
+        .orbFrozenTime(1.2)
+        .beamFrozenTime(1.5)
+        .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: effects)
+        renderer.scale = 2
+        if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) {
+            try? png.write(to: URL(fileURLWithPath: folder).appendingPathComponent("effects.png"))
         }
     }
 }

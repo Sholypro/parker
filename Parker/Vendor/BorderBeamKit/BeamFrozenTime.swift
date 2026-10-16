@@ -17,3 +17,10 @@ extension EnvironmentValues {
         set { self[BeamFrozenTimeKey.self] = newValue }
     }
 }
+
+public extension View {
+    /// Parker patch: pins the beam to one frame (for `Parker --render-settings` previews).
+    func beamFrozenTime(_ t: Double?) -> some View {
+        environment(\.beamFrozenTime, t)
+    }
+}

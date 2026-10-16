@@ -1,0 +1,33 @@
+# Rendu des réglages et des effets libraries.dev de l'app compilée (lancement manuel).
+# Les images sont publiées sur la branche ci-previews pour la revue visuelle.
+name: UI preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compiler Parker.app
+        env:
+          PARKER_REQUIRE_SHADERS: "1"
+        run: ./build-app.sh --no-install > build.log 2>&1 || { tail -40 build.log; exit 1; }
+      - name: Rendu
+        run: |
+          mkdir -p previews
+          dist/Parker.app/Contents/MacOS/Parker --render-settings "$PWD/previews"
+          ls -la previews
+      - name: Publier sur ci-previews
+        run: |
+          cd previews
+          git init -q -b ci-previews
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Rendu ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-previews

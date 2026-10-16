@@ -1,5 +1,7 @@
 import Cocoa
 import ApplicationServices
+import SwiftUI
+import ThinkingOrbsKit
 
 /// Scrolling capture, CleanShot style:
 /// select an area, then either scroll yourself (the area is streamed at up to 30 fps and
@@ -440,10 +442,16 @@ class ScrollCapture {
         window.ignoresMouseEvents = true
         window.sharingType = .none
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.contentView = ScrollBorderView(
-            frame: NSRect(origin: .zero, size: screen.frame.size),
-            highlightRect: localRect
+        // Border beam (libraries.dev) around the area while frames are stitched (top-left coordinates)
+        let topLeftRect = CGRect(
+            x: localRect.minX,
+            y: screen.frame.height - localRect.maxY,
+            width: localRect.width,
+            height: localRect.height
         )
+        let hosting = NSHostingView(rootView: CaptureBeamFrame(area: topLeftRect))
+        hosting.frame = NSRect(origin: .zero, size: screen.frame.size)
+        window.contentView = hosting
         window.orderFront(nil)
         borderWindow = window
     }
@@ -516,31 +524,6 @@ private final class FirstMouseButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-// MARK: - Border overlay
-
-private final class ScrollBorderView: NSView {
-    let highlightRect: NSRect
-
-    init(frame: NSRect, highlightRect: NSRect) {
-        self.highlightRect = highlightRect
-        super.init(frame: frame)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not implemented")
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        // Drawn strictly outside the captured area
-        let outer = highlightRect.insetBy(dx: -3, dy: -3)
-        context.setStrokeColor(NSColor.controlAccentColor.cgColor)
-        context.setLineWidth(2)
-        context.setLineDash(phase: 0, lengths: [7, 4])
-        context.stroke(outer)
-    }
-}
-
 // MARK: - HUD
 
 private final class ScrollHUDView: NSView {
@@ -551,6 +534,8 @@ private final class ScrollHUDView: NSView {
     var statusText: String { statusLabel.stringValue }
 
     private let statusIcon = NSImageView()
+    /// Thinking orb (libraries.dev) while frames are captured; replaced by a warning icon when needed.
+    private let orbView = NSHostingView(rootView: ThinkingOrb(state: .working, size: .px20, theme: .dark))
     private let statusLabel = NSTextField(labelWithString: "")
     private let autoButton = FirstMouseButton()
     private let doneButton = FirstMouseButton()
@@ -605,11 +590,15 @@ private final class ScrollHUDView: NSView {
         addSubview(autoButton)
 
         statusIcon.frame = NSRect(x: 12, y: (h - 16) / 2, width: 16, height: 16)
-        statusIcon.image = NSImage(systemSymbolName: "arrow.up.and.down.text.horizontal", accessibilityDescription: nil)
-        statusIcon.contentTintColor = .secondaryLabelColor
+        statusIcon.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
+        statusIcon.contentTintColor = .systemOrange
+        statusIcon.isHidden = true
         addSubview(statusIcon)
 
-        statusLabel.frame = NSRect(x: 34, y: (h - 30) / 2, width: autoButton.frame.minX - 40, height: 30)
+        orbView.frame = NSRect(x: 10, y: (h - 20) / 2, width: 20, height: 20)
+        addSubview(orbView)
+
+        statusLabel.frame = NSRect(x: 38, y: (h - 30) / 2, width: autoButton.frame.minX - 44, height: 30)
         statusLabel.font = .systemFont(ofSize: 11, weight: .medium)
         statusLabel.textColor = .labelColor
         statusLabel.maximumNumberOfLines = 2
@@ -626,11 +615,8 @@ private final class ScrollHUDView: NSView {
         isShowingWarning = warning
         statusLabel.stringValue = text
         statusLabel.textColor = warning ? .systemOrange : .labelColor
-        statusIcon.image = NSImage(
-            systemSymbolName: warning ? "exclamationmark.triangle.fill" : "arrow.up.and.down.text.horizontal",
-            accessibilityDescription: nil
-        )
-        statusIcon.contentTintColor = warning ? .systemOrange : .secondaryLabelColor
+        statusIcon.isHidden = !warning
+        orbView.isHidden = warning
     }
 
     func setAuto(_ on: Bool) {

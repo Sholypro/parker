@@ -1,4 +1,6 @@
 import Cocoa
+import ThinkingOrbsKit
+import SwiftUI
 
 /// Self-update from GitHub Releases (no third-party dependency).
 ///
@@ -213,17 +215,18 @@ final class UpdateChecker {
     // MARK: - UI helpers
 
     private func showProgress() {
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 80),
-                            styleMask: [.titled], backing: .buffered, defer: false)
+        let hosting = NSHostingView(rootView: UpdateProgressView())
+        let size = hosting.fittingSize
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
+                            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
         panel.title = "Mise à jour"
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.backgroundColor = NSColor(srgbRed: 17 / 255, green: 24 / 255, blue: 39 / 255, alpha: 1)
         panel.level = .floating
-        let spinner = NSProgressIndicator(frame: NSRect(x: 20, y: 28, width: 24, height: 24))
-        spinner.style = .spinning
-        spinner.startAnimation(nil)
-        let label = NSTextField(labelWithString: "Téléchargement de la nouvelle version…")
-        label.frame = NSRect(x: 54, y: 30, width: 230, height: 20)
-        panel.contentView?.addSubview(spinner)
-        panel.contentView?.addSubview(label)
+        panel.contentView = hosting
         panel.center()
         panel.makeKeyAndOrderFront(nil)
         progressWindow = panel
@@ -276,5 +279,21 @@ final class UpdateChecker {
         } catch {
             return -1
         }
+    }
+}
+
+/// Download in progress: thinking orb + label (the download and unzip take a few seconds).
+private struct UpdateProgressView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ActivityPill(text: "Téléchargement de la nouvelle version…", state: .connecting)
+            Text("Parker redémarrera tout seul une fois la mise à jour installée.")
+                .font(.system(size: 11))
+                .foregroundColor(SettingsColor.muted)
+                .padding(.leading, 4)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 30)
+        .padding(.bottom, 20)
     }
 }
