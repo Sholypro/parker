@@ -295,10 +295,20 @@ class MenuBarController {
 
     private func runCaptureScrolling() {
         scrollCapture.start { [weak self] result in
-            if case .success(let url) = result {
+            switch result {
+            case .success(let url):
                 Defaults.shared.addRecentCapture(url)
                 self?.thumbnailController.show(for: url)
                 self?.rebuildMenu()
+            case .failure(let error):
+                // Escape or a too small selection: nothing to report.
+                if (error as? CaptureError) == .cancelled { return }
+                NSLog("Scrolling capture failed: \(error)")
+                if !CGPreflightScreenCaptureAccess() {
+                    ScreenGrabber.reportFailureIfNeeded()
+                } else {
+                    Toast.show(message: "La capture défilante a échoué", style: .error)
+                }
             }
         }
     }
@@ -326,8 +336,10 @@ class MenuBarController {
             switch result {
             case .success(let text):
                 Toast.show(message: "Texte copié (\(text.prefix(30))…)")
-            case .failure:
-                Toast.show(message: "Aucun texte détecté", style: .error)
+            case .failure(let error):
+                // Escape during the selection: the user cancelled, no error to show.
+                if (error as? CaptureError) == .cancelled { return }
+                Toast.show(message: "Texte introuvable", style: .error)
             }
         }
     }
@@ -412,7 +424,7 @@ class MenuBarController {
         killTask.launch()
 
         rebuildMenu()
-        Toast.show(message: newState ? "Desktop icons hidden" : "Desktop icons restored")
+        Toast.show(message: newState ? "Icônes du bureau masquées" : "Icônes du bureau affichées")
     }
 
     @objc private func showAllInOne() {

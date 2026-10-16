@@ -38,14 +38,31 @@ fi
 # on les compile ici quand le compilateur Metal est là (Xcode complet, comme sur GitHub).
 # Sans lui, Parker fonctionne et affiche une bordure simple à la place de l'effet.
 # PARKER_REQUIRE_SHADERS=1 (publication) : échec si la compilation est impossible.
+REQUIRE_SHADERS="${PARKER_REQUIRE_SHADERS:-0}"
+METALLIB="$APP/Contents/Resources/BorderBeam.metallib"
 if xcrun -sdk macosx -f metal >/dev/null 2>&1; then
   echo "→ Compilation des shaders Metal…"
-  AIR="$(mktemp -t beam).air"
-  xcrun -sdk macosx metal -mmacosx-version-min=14.0 -c "$PKG/Shaders/BeamShaders.metal" -o "$AIR"
-  xcrun -sdk macosx metallib "$AIR" -o "$APP/Contents/Resources/BorderBeam.metallib"
-  rm -f "$AIR"
-elif [[ "${PARKER_REQUIRE_SHADERS:-0}" == "1" ]]; then
-  echo "→ Compilateur Metal introuvable : impossible de compiler les shaders."
+  # `xcrun -f metal` peut réussir alors que la compilation échoue (ex. Xcode 26 sans la
+  # « Metal Toolchain » installée) : on teste chaque étape au lieu de laisser `set -e` tout arrêter.
+  SHADER_TMP="$(mktemp -d -t parker-shaders)"
+  AIR="$SHADER_TMP/BeamShaders.air"
+  if xcrun -sdk macosx metal -mmacosx-version-min=14.0 -c "$PKG/Shaders/BeamShaders.metal" -o "$AIR" \
+     && xcrun -sdk macosx metallib "$AIR" -o "$METALLIB"; then
+    echo "→ Shaders Metal compilés."
+  else
+    rm -f "$METALLIB"
+    if [[ "$REQUIRE_SHADERS" == "1" ]]; then
+      rm -rf "$SHADER_TMP"
+      echo "→ Échec de la compilation des shaders Metal (PARKER_REQUIRE_SHADERS=1) : build interrompu."
+      echo "  Vérifie que la Metal Toolchain est installée : xcodebuild -downloadComponent MetalToolchain"
+      exit 1
+    fi
+    echo "→ Échec de la compilation des shaders Metal (Metal Toolchain manquante ?) :"
+    echo "  l'app est construite sans metallib, l'effet « border beam » est remplacé par une bordure simple."
+  fi
+  rm -rf "$SHADER_TMP"
+elif [[ "$REQUIRE_SHADERS" == "1" ]]; then
+  echo "→ Compilateur Metal introuvable (PARKER_REQUIRE_SHADERS=1) : impossible de compiler les shaders."
   exit 1
 else
   echo "→ Compilateur Metal absent (Xcode non installé) : effet « border beam » remplacé par une bordure simple."

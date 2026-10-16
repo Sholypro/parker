@@ -1,6 +1,7 @@
 import Cocoa
 import AVFoundation
 import ScreenCaptureKit
+import ThinkingOrbsKit
 
 class ScreenRecorder: NSObject {
     private var stream: SCStream?
@@ -37,6 +38,7 @@ class ScreenRecorder: NSObject {
     private var updateTimer: Timer?
     private var borderWindow: NSWindow?
     private var keyMonitor: Any?
+    private var globalKeyMonitor: Any?
     private var gifButton: NSButton?
 
     private var activeAreaSelector: AreaSelector?
@@ -47,12 +49,15 @@ class ScreenRecorder: NSObject {
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = displayForMouseLocation(content.displays) else { return }
+                guard let display = displayForMouseLocation(content.displays) else {
+                    throw CaptureError.noDisplay
+                }
 
-                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let filter = makeFilter(display: display, content: content)
                 try await startRecording(filter: filter, display: display)
             } catch {
                 NSLog("Recording failed: \(error)")
+                await handleStartFailure()
             }
         }
     }
@@ -66,11 +71,14 @@ class ScreenRecorder: NSObject {
                 Task {
                     do {
                         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                        guard let display = self.displayForMouseLocation(content.displays) else { return }
-                        let filter = SCContentFilter(display: display, excludingWindows: [])
+                        guard let display = self.displayForMouseLocation(content.displays) else {
+                            throw CaptureError.noDisplay
+                        }
+                        let filter = self.makeFilter(display: display, content: content)
                         try await self.startRecording(filter: filter, display: display, cropRect: rect)
                     } catch {
                         NSLog("Area recording failed: \(error)")
+                        await self.handleStartFailure()
                     }
                 }
             case .failure:
@@ -79,6 +87,42 @@ class ScreenRecorder: NSObject {
         }
         activeAreaSelector = selector
         selector.show()
+    }
+
+    /// Excludes Parker's own application (toolbar, area border, toasts, thumbnails) from the video.
+    /// `sharingType = .none` is ignored by ScreenCaptureKit on macOS 15+, so the filter is the only
+    /// reliable way to keep these windows out of the recording (same approach as ScreenGrabber).
+    private func makeFilter(display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let ownApps = content.applications.filter { $0.processID == ownPID }
+        return SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
+    }
+
+    /// Cleans up a half-started recording and tells the user why nothing happens.
+    @MainActor
+    private func handleStartFailure() {
+        if let stream = stream {
+            Task { try? await stream.stopCapture() }
+        }
+        stream = nil
+        isRecording = false
+        isPaused = false
+        if let writer = assetWriter {
+            if writer.status == .writing {
+                writer.cancelWriting()
+            }
+            // Only remove the file this writer created (empty or partial).
+            try? FileManager.default.removeItem(at: writer.outputURL)
+        }
+        assetWriter = nil
+        videoInput = nil
+        audioInput = nil
+        recordingURL = nil
+
+        Toast.show(message: "Impossible de lancer l'enregistrement", style: .error)
+        if !CGPreflightScreenCaptureAccess() {
+            PermissionAssistant.shared.show()
+        }
     }
 
     private func displayForMouseLocation(_ displays: [SCDisplay]) -> SCDisplay? {
@@ -216,9 +260,9 @@ class ScreenRecorder: NSObject {
             }
             isPaused = false
             DispatchQueue.main.async {
-                self.pauseButton?.image = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: "Pause")
+                self.pauseButton?.image = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: "Mettre en pause")
                 self.pauseButton?.contentTintColor = .white.withAlphaComponent(0.85)
-                self.statusLabel?.stringValue = "Recording"
+                self.statusLabel?.stringValue = "En cours"
                 self.statusDot?.layer?.backgroundColor = NSColor.systemRed.cgColor
                 self.resumeDotPulse()
             }
@@ -226,9 +270,9 @@ class ScreenRecorder: NSObject {
             pauseStartDate = Date()
             isPaused = true
             DispatchQueue.main.async {
-                self.pauseButton?.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Resume")
+                self.pauseButton?.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Reprendre")
                 self.pauseButton?.contentTintColor = .systemGreen
-                self.statusLabel?.stringValue = "Paused"
+                self.statusLabel?.stringValue = "En pause"
                 self.statusDot?.layer?.removeAnimation(forKey: "pulse")
                 self.statusDot?.layer?.backgroundColor = NSColor.systemYellow.cgColor
                 self.statusDot?.layer?.opacity = 1.0
@@ -284,7 +328,7 @@ class ScreenRecorder: NSObject {
         x += 16
 
         // Status label
-        let status = NSTextField(labelWithString: "Recording")
+        let status = NSTextField(labelWithString: "En cours")
         status.textColor = .white.withAlphaComponent(0.6)
         status.font = .systemFont(ofSize: 10, weight: .medium)
         status.frame = NSRect(x: x, y: 38, width: 70, height: 14)
@@ -306,7 +350,7 @@ class ScreenRecorder: NSObject {
 
         // Pause button + shortcut
         let pauseBtn = makeToolbarButton(
-            icon: "pause.fill", tooltip: "Pause Recording",
+            icon: "pause.fill", tooltip: "Mettre en pause",
             action: #selector(pauseClicked), tint: .white.withAlphaComponent(0.85)
         )
         let pauseCol = makeButtonColumn(button: pauseBtn, shortcut: "P", x: x)
@@ -316,7 +360,7 @@ class ScreenRecorder: NSObject {
 
         // Stop button + shortcut
         let stopBtn = makeToolbarButton(
-            icon: "stop.fill", tooltip: "Stop Recording",
+            icon: "stop.fill", tooltip: "Arrêter l'enregistrement",
             action: #selector(stopClicked), tint: .systemRed
         )
         let stopCol = makeButtonColumn(button: stopBtn, shortcut: "S", x: x)
@@ -329,7 +373,7 @@ class ScreenRecorder: NSObject {
 
         // GIF toggle + shortcut
         let gifBtn = makeToolbarButton(
-            icon: "photo.badge.arrow.down", tooltip: "Toggle GIF export",
+            icon: "photo.badge.arrow.down", tooltip: "Exporter en GIF (activer ou désactiver)",
             action: #selector(exportGIFClicked), tint: .white.withAlphaComponent(0.5)
         )
         gifButton = gifBtn
@@ -363,6 +407,16 @@ class ScreenRecorder: NSObject {
                 return nil
             }
             return event
+        }
+
+        // The local monitor only sees keys while Parker is active. During a recording the user is
+        // usually in another app, so Escape is also watched globally (needs the Accessibility
+        // permission to receive events; without it this monitor stays silent).
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.isRecording, event.keyCode == 53 else { return }
+            DispatchQueue.main.async {
+                self.stopClicked()
+            }
         }
 
         updateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
@@ -437,6 +491,10 @@ class ScreenRecorder: NSObject {
             NSEvent.removeMonitor(monitor)
             keyMonitor = nil
         }
+        if let monitor = globalKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalKeyMonitor = nil
+        }
         toolbarWindow?.orderOut(nil)
         toolbarWindow = nil
         borderWindow?.orderOut(nil)
@@ -506,7 +564,7 @@ class ScreenRecorder: NSObject {
     @objc private func exportGIFClicked() {
         shouldExportGIF.toggle()
         gifButton?.contentTintColor = shouldExportGIF ? .systemPurple : .white.withAlphaComponent(0.5)
-        Toast.show(message: shouldExportGIF ? "Will export as GIF" : "Will save as MP4")
+        Toast.show(message: shouldExportGIF ? "Export en GIF à l'arrêt" : "Enregistrement en MP4", style: .info)
     }
 
     private func stopAndExportGIF() {
@@ -525,19 +583,22 @@ class ScreenRecorder: NSObject {
             await MainActor.run {
                 dismissToolbar()
 
-                guard let url = recordingURL else { return }
+                guard let url = recordingURL else {
+                    Toast.show(message: "Échec de l'export GIF", style: .error)
+                    return
+                }
 
-                Toast.show(message: "Converting to GIF...")
+                Toast.showActivity(message: "Conversion en GIF…", state: .working)
                 let maxW = Defaults.shared.gifMaxWidth
                 let fps = Defaults.shared.gifFrameRate
                 GIFExporter.exportToGIF(videoURL: url, maxWidth: maxW, fps: fps) { [weak self] result in
                     switch result {
                     case .success(let gifURL):
                         Defaults.shared.addRecentCapture(gifURL)
-                        Toast.show(message: "GIF saved: \(gifURL.lastPathComponent)")
+                        Toast.show(message: "GIF enregistré : \(gifURL.lastPathComponent)")
                         self?.onRecordingFinished?(gifURL)
                     case .failure:
-                        Toast.show(message: "GIF export failed", style: .error)
+                        Toast.show(message: "Échec de l'export GIF", style: .error)
                         Defaults.shared.addRecentCapture(url)
                         self?.onRecordingFinished?(url)
                     }
@@ -618,7 +679,18 @@ private class RecordingBorderView: NSView {
 
 extension ScreenRecorder: SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard isRecording else { return }
+        guard isRecording, sampleBuffer.isValid else { return }
+
+        // Only complete screen frames carry new pixels. Idle/blank/suspended frames have no
+        // image buffer and would make the writer fail (same check as ScrollFrameSource).
+        if type == .screen {
+            guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+                  let statusRaw = attachments.first?[.status] as? Int,
+                  let status = SCFrameStatus(rawValue: statusRaw),
+                  status == .complete,
+                  sampleBuffer.imageBuffer != nil
+            else { return }
+        }
 
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
 

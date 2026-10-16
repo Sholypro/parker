@@ -40,9 +40,17 @@ namespace Parker
             Selector.Show(SelectMode.Area, (rect, snapshot) =>
             {
                 if (snapshot != null) snapshot.Dispose();
-                if (!rect.HasValue || rect.Value.Width < 40 || rect.Value.Height < 60) return;
+                // Selection cancelled or too small: report it so the caller releases its lock
+                if (!rect.HasValue || rect.Value.Width < 40 || rect.Value.Height < 60) { onDone(null); return; }
                 area = rect.Value;
-                Begin();
+                try { Begin(); }
+                catch (Exception ex)
+                {
+                    active = false; auto = false;
+                    Teardown();
+                    Toast.Show("Erreur : " + ex.Message, 4000);
+                    onDone(null);
+                }
             });
         }
 
@@ -83,7 +91,11 @@ namespace Parker
                 if (!auto)
                 {
                     var frame = Grab();
-                    if (frame != null) buffer.Push(frame);
+                    if (frame != null)
+                    {
+                        if (active) buffer.Push(frame);
+                        else frame.Dispose(); // session ended during the grab: nobody will drain it
+                    }
                 }
                 var wait = FrameIntervalMs - (int)(watch.ElapsedMilliseconds - t0);
                 Thread.Sleep(Math.Max(5, wait));
@@ -198,6 +210,13 @@ namespace Parker
                     }
                 }).ContinueWith(t =>
                 {
+                    if (t.IsFaulted)
+                    {
+                        if (!active) return;
+                        auto = false; hud.SetAuto(false);
+                        SetStatus("Auto-scroll arrêté : erreur de capture", true);
+                        return;
+                    }
                     var r = t.Result;
                     Handle(r.Item1, r.Item2, r.Item3);
                     if (!active || !auto) return;
@@ -239,11 +258,19 @@ namespace Parker
                 }
             }).ContinueWith(t =>
             {
+                if (t.IsFaulted)
+                {
+                    var ex = t.Exception != null ? t.Exception.GetBaseException() : null;
+                    Toast.Show("Erreur : " + (ex != null ? ex.Message : "capture défilante impossible"), 4000);
+                    onDone(null);
+                    return;
+                }
                 var image = t.Result;
                 if (image == null) { onDone(null); return; }
-                var path = ImageStore.Finish(image);
-                image.Dispose();
-                onDone(path);
+                string path = null;
+                try { path = ImageStore.Finish(image); }
+                catch (Exception ex) { Toast.Show("Erreur : " + ex.Message, 4000); }
+                finally { image.Dispose(); onDone(path); }
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
@@ -262,6 +289,7 @@ namespace Parker
                     st.Dispose();
                 }
             });
+            onDone(null);
         }
 
         void Teardown()

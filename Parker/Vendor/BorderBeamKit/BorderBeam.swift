@@ -36,10 +36,19 @@ public struct BorderBeam<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Time-based fade evaluated per-frame in the layers' TimelineViews.
-    @State private var fade: BeamFade = .hidden
+    /// Parker patch: an ObservableObject instead of `@State` (macro in recent SDKs, not
+    /// available when building with the Command Line Tools only).
+    @StateObject private var lifecycle: BeamLifecycle
+    private var fade: BeamFade {
+        get { lifecycle.fade }
+        nonmutating set { lifecycle.fade = newValue }
+    }
     /// Keeps layers mounted while fading out. Seeded from `active` so a render
     /// that never delivers `onAppear` (e.g. `ImageRenderer`) still draws.
-    @State private var mounted: Bool
+    private var mounted: Bool {
+        get { lifecycle.mounted }
+        nonmutating set { lifecycle.mounted = newValue }
+    }
 
     public init(
         size: BeamSize = .md,
@@ -73,7 +82,7 @@ public struct BorderBeam<Content: View>: View {
         self.onActivate = onActivate
         self.onDeactivate = onDeactivate
         self.content = content()
-        _mounted = State(initialValue: active)
+        _lifecycle = StateObject(wrappedValue: BeamLifecycle(mounted: active))
     }
 
     public var body: some View {
@@ -234,4 +243,11 @@ public extension View {
             onDeactivate: onDeactivate
         ) { self }
     }
+}
+
+/// Parker patch: holds the beam's fade state (replaces two `@State` properties).
+final class BeamLifecycle: ObservableObject {
+    @Published var fade: BeamFade = .hidden
+    @Published var mounted: Bool
+    init(mounted: Bool) { self.mounted = mounted }
 }

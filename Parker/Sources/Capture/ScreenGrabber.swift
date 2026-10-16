@@ -138,9 +138,12 @@ enum ScreenGrabber {
         return ids[0]
     }
 
-    /// Shows a clear message (once per launch) when the capture failed for lack of permission.
+    /// Reports a failed capture. When the screen recording permission is missing, the
+    /// permission assistant opens at most once per launch; every other time (or for any other
+    /// cause) an error toast is shown instead, so a failure is never silent.
     static func reportFailureIfNeeded() {
-        guard lastFailure == .noPermission || !CGPreflightScreenCaptureAccess() else {
+        let permissionMissing = lastFailure == .noPermission || !CGPreflightScreenCaptureAccess()
+        guard permissionMissing, !didWarnAboutPermission else {
             Toast.show(message: "La capture a échoué", style: .error)
             return
         }

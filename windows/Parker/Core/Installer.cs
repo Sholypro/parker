@@ -31,7 +31,18 @@ namespace Parker
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Parker.lnk"); }
         }
 
-        static string CurrentExe { get { return Application.ExecutablePath; } }
+        /// <summary>Path of the running exe (Environment.ProcessPath on .NET 6+).</summary>
+        public static string CurrentExe
+        {
+            get
+            {
+#if MONO_CHECK
+                return Application.ExecutablePath;
+#else
+                return Environment.ProcessPath ?? Application.ExecutablePath;
+#endif
+            }
+        }
 
         public static bool IsInstalledCopy
         {
@@ -101,15 +112,21 @@ namespace Parker
             try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false); } catch { }
 
             // The running exe cannot delete itself: a hidden command removes the folder once we exit
+            // cmd reads scripts in the OEM code page: the script stays pure ASCII and the paths
+            // (which contain the user name, possibly accented) go through environment variables
             var pid = Process.GetCurrentProcess().Id;
             var script = Path.Combine(Path.GetTempPath(), "parker-uninstall.cmd");
             File.WriteAllText(script,
                 "@echo off\r\n" +
                 ":wait\r\n" +
-                "tasklist /FI \"PID eq " + pid + "\" | find \"" + pid + "\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
-                "rmdir /s /q \"" + InstallDir + "\"\r\n" +
-                "del \"%~f0\"\r\n");
-            Process.Start(new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"") { CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden });
+                "tasklist /FI \"PID eq %PARKER_PID%\" | find \"%PARKER_PID%\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
+                "rmdir /s /q \"%PARKER_DIR%\"\r\n" +
+                "del \"%~f0\"\r\n",
+                System.Text.Encoding.ASCII);
+            var psi = new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"") { CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden };
+            psi.Environment["PARKER_PID"] = pid.ToString();
+            psi.Environment["PARKER_DIR"] = InstallDir;
+            Process.Start(psi);
 
             MessageBox.Show("Parker a été désinstallé.", "Parker", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -121,11 +138,19 @@ namespace Parker
 
         static void StopOtherInstances()
         {
+            // Also catches renamed downloads such as "Parker-Setup" or "Parker (1)"
             var me = Process.GetCurrentProcess().Id;
-            foreach (var p in Process.GetProcessesByName("Parker"))
+            foreach (var p in Process.GetProcesses())
             {
-                if (p.Id == me) continue;
-                try { p.Kill(); p.WaitForExit(4000); } catch { }
+                using (p)
+                {
+                    try
+                    {
+                        if (p.Id == me || !p.ProcessName.StartsWith("Parker", StringComparison.OrdinalIgnoreCase)) continue;
+                        p.Kill(); p.WaitForExit(4000);
+                    }
+                    catch { }
+                }
             }
         }
 

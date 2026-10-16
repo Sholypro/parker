@@ -207,8 +207,19 @@ class BackgroundPanelController {
     private var previewImageView: NSImageView?
     private var sourceImage: NSImage?
     private var presetButtons: [PresetButton] = []
+    private var closeObserver: NSObjectProtocol?
+
+    deinit {
+        if let observer = closeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
 
     func show(for image: NSImage) {
+        // Reopening while a panel is still open: drop the previous one cleanly first.
+        if window != nil {
+            closePanel()
+        }
         sourceImage = image
 
         let panelWidth: CGFloat = 340
@@ -222,6 +233,9 @@ class BackgroundPanelController {
             defer: false
         )
         window.title = "Background"
+        // We keep our own strong reference: AppKit must not also release the window when
+        // the red close button is used, or the later release would crash.
+        window.isReleasedWhenClosed = false
         window.titlebarAppearsTransparent = false
         window.isMovableByWindowBackground = true
 
@@ -346,6 +360,32 @@ class BackgroundPanelController {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.window = window
+
+        // Closed with the red button: forget the window so a later show() starts fresh.
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.windowDidClose()
+        }
+    }
+
+    private func windowDidClose() {
+        if let observer = closeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            closeObserver = nil
+        }
+        window = nil
+        previewImageView = nil
+        presetButtons = []
+    }
+
+    private func closePanel() {
+        guard let window = window else { return }
+        // close() posts willCloseNotification, which runs windowDidClose().
+        window.close()
+        if self.window != nil { windowDidClose() }
     }
 
     private func addSliderRow(to parent: NSView, label: String, value: CGFloat, min: Double, max: Double,
@@ -424,8 +464,7 @@ class BackgroundPanelController {
 
     @objc private func applyClicked() {
         onApply?(config)
-        window?.orderOut(nil)
-        window = nil
+        closePanel()
     }
 }
 

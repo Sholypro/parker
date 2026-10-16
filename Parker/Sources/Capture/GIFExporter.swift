@@ -4,7 +4,7 @@ import ImageIO
 import UniformTypeIdentifiers
 
 class GIFExporter {
-    static func exportToGIF(videoURL: URL, maxWidth: Int = 800, fps: Int = 20, completion: @escaping (Result<URL, Error>) -> Void) {
+    static func exportToGIF(videoURL: URL, maxWidth: Int = 640, fps: Int = 15, completion: @escaping (Result<URL, Error>) -> Void) {
         let asset = AVAsset(url: videoURL)
 
         Task {

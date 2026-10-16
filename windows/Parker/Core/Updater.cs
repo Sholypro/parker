@@ -136,16 +136,23 @@ namespace Parker
         /// <summary>Swaps Parker.exe once this process has exited, then relaunches it.</summary>
         static void Install(string newExe)
         {
-            var current = Application.ExecutablePath;
+            var current = Installer.CurrentExe;
             var script = Path.Combine(Path.GetDirectoryName(newExe), "update.cmd");
             var pid = Process.GetCurrentProcess().Id;
+            // cmd reads scripts in the OEM code page: the script stays pure ASCII and the paths
+            // (which contain the user name, possibly accented) go through environment variables
             File.WriteAllText(script,
                 "@echo off\r\n" +
                 ":wait\r\n" +
-                "tasklist /FI \"PID eq " + pid + "\" | find \"" + pid + "\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
-                "copy /Y \"" + newExe + "\" \"" + current + "\" >nul\r\n" +
-                "start \"\" \"" + current + "\"\r\n");
-            Process.Start(new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"") { CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden });
+                "tasklist /FI \"PID eq %PARKER_PID%\" | find \"%PARKER_PID%\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
+                "copy /Y \"%PARKER_NEW%\" \"%PARKER_EXE%\" >nul\r\n" +
+                "start \"\" \"%PARKER_EXE%\"\r\n",
+                System.Text.Encoding.ASCII);
+            var psi = new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"") { CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden };
+            psi.Environment["PARKER_PID"] = pid.ToString();
+            psi.Environment["PARKER_NEW"] = newExe;
+            psi.Environment["PARKER_EXE"] = current;
+            Process.Start(psi);
             Application.Exit();
         }
     }

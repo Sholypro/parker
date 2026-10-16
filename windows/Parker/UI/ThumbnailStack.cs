@@ -30,7 +30,9 @@ namespace Parker
             Layout(false, card);
             card.Show();
             card.SlideIn();
-            while (cards.Count > 6) cards[0].Dismiss();
+            // Too many cards: dismiss the oldest ones still on screen (each leaves the list on close)
+            var live = cards.Where(c => !c.IsDismissing).ToList();
+            for (var i = 0; i < live.Count - 6; i++) live[i].Dismiss();
         }
 
         public static void CloseAll()
@@ -50,6 +52,7 @@ namespace Parker
             for (var i = cards.Count - 1; i >= 0; i--)
             {
                 var c = cards[i];
+                if (c.IsDismissing) continue; // sliding out: keep its own animation
                 y -= c.Height;
                 var x = Left ? screen.Left + pad : screen.Right - pad - c.Width;
                 if (y < screen.Top + pad) { c.Dismiss(); continue; }
@@ -80,6 +83,7 @@ namespace Parker
 
         public Point Target;
         public bool IsEmpty { get { return thumb == null; } }
+        public bool IsDismissing { get { return dismissing; } }
 
         Dictionary<string, Rectangle> buttons = new Dictionary<string, Rectangle>();
 
@@ -291,7 +295,17 @@ namespace Parker
             menu.Items.Add("Supprimer", null, (s, e) => Delete());
             menu.Items.Add("Fermer", null, (s, e) => Dismiss());
             menu.Items.Add("Tout fermer", null, (s, e) => ThumbnailStack.CloseAll());
+            // Dispose once closed, after the clicked item has run
+            menu.Closed += (s, e) => DisposeLater(menu);
             menu.Show(this, at);
+        }
+
+        internal static void DisposeLater(ContextMenuStrip menu)
+        {
+            // ItemClicked fires after Closed: defer the disposal to the next message loop turn
+            var t = new Timer { Interval = 1 };
+            t.Tick += (s, e) => { t.Stop(); t.Dispose(); menu.Dispose(); };
+            t.Start();
         }
 
         void SaveAs()

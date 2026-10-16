@@ -25,9 +25,26 @@ class OCRTool {
     }
 
     private func recognizeText(in image: CGImage, completion: @escaping (Result<String, Error>) -> Void) {
+        // Delivers exactly one result on the main thread, whichever path finishes first
+        // (request handler or a thrown error from perform).
+        var delivered = false
+        let deliver: (Result<String, Error>) -> Void = { result in
+            DispatchQueue.main.async {
+                guard !delivered else { return }
+                delivered = true
+                if case .success(let text) = result {
+                    // Copy to clipboard
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(text, forType: .string)
+                }
+                completion(result)
+            }
+        }
+
         let request = VNRecognizeTextRequest { request, error in
             if let error = error {
-                DispatchQueue.main.async { completion(.failure(error)) }
+                deliver(.failure(error))
                 return
             }
 
@@ -35,24 +52,24 @@ class OCRTool {
                 .compactMap { $0.topCandidates(1).first?.string }
                 .joined(separator: "\n") ?? ""
 
-            DispatchQueue.main.async {
-                if text.isEmpty {
-                    completion(.failure(CaptureError.captureFailed))
-                } else {
-                    // Copy to clipboard
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(text, forType: .string)
-                    completion(.success(text))
-                }
+            if text.isEmpty {
+                deliver(.failure(CaptureError.captureFailed))
+            } else {
+                deliver(.success(text))
             }
         }
         request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["fr-FR", "en-US"]
         request.usesLanguageCorrection = true
 
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         DispatchQueue.global(qos: .userInitiated).async {
-            try? handler.perform([request])
+            do {
+                try handler.perform([request])
+            } catch {
+                NSLog("OCR failed: \(error)")
+                deliver(.failure(error))
+            }
         }
     }
 }

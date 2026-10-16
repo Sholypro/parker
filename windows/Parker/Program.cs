@@ -15,6 +15,12 @@ namespace Parker
         [STAThread]
         static void Main(string[] args)
         {
+            // Must be set before any window exists: UI-thread exceptions show a toast instead of crashing
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) =>
+            {
+                try { Toast.Show("Erreur : " + e.Exception.Message, 4000); } catch { }
+            };
 #if !MONO_CHECK
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
 #endif
@@ -24,8 +30,9 @@ namespace Parker
             if (args.Contains("--uninstall")) { Installer.Uninstall(); return; }
             if (!Installer.IsInstalledCopy)
             {
-                // Launched from Downloads (or anywhere else): install properly, then hand over
-                if (!args.Contains("--portable") && Installer.InstallFromDownload()) return;
+                // Launched from Downloads (or anywhere else): install properly, then hand over.
+                // A startup launch of a non-installed copy just runs as portable (no install dialogs at logon).
+                if (!args.Contains("--portable") && !args.Contains("--startup") && Installer.InstallFromDownload()) return;
             }
             else Installer.RefreshRegistration();
 
@@ -135,7 +142,10 @@ namespace Parker
 
         void BuildMenu()
         {
+            // Rebuilt on every opening: dispose the previous items (and their submenus)
+            var old = menu.Items.Cast<ToolStripItem>().ToList();
             menu.Items.Clear();
+            foreach (var it in old) it.Dispose();
             Action<string, Action> item = (text, action) =>
             {
                 var mi = new ToolStripMenuItem(text, null, (s, e) => action());
@@ -197,54 +207,46 @@ namespace Parker
             if (path != null) ThumbnailStack.Show(path);
         }
 
-        void CaptureArea()
-        {
-            Run(() => Selector.Show(SelectMode.Area, (rect, snapshot) =>
-            {
-                string path = null;
-                if (rect.HasValue)
-                    using (var img = ScreenGrab.Crop(snapshot, rect.Value)) path = ImageStore.Finish(img);
-                snapshot.Dispose();
-                Done(path);
-            }));
-        }
+        void CaptureArea() { Run(() => Selector.Show(SelectMode.Area, CropAndFinish)); }
 
-        void CaptureWindow()
+        void CaptureWindow() { Run(() => Selector.Show(SelectMode.Window, CropAndFinish)); }
+
+        /// <summary>Selector callback: Done always runs, even if the crop or the save fails.</summary>
+        void CropAndFinish(Rectangle? rect, Bitmap snapshot)
         {
-            Run(() => Selector.Show(SelectMode.Window, (rect, snapshot) =>
+            string path = null;
+            try
             {
-                string path = null;
-                if (rect.HasValue)
+                if (rect.HasValue && snapshot != null)
                     using (var img = ScreenGrab.Crop(snapshot, rect.Value)) path = ImageStore.Finish(img);
-                snapshot.Dispose();
+            }
+            catch (Exception ex) { Toast.Show("Erreur : " + ex.Message, 4000); }
+            finally
+            {
+                if (snapshot != null) snapshot.Dispose();
                 Done(path);
-            }));
+            }
         }
 
         void CaptureFullscreen()
         {
             Run(() =>
             {
-                var screen = ScreenGrab.ScreenUnderCursor();
-                using (var img = ScreenGrab.Capture(screen.Bounds))
+                string path = null;
+                try
                 {
-                    var path = ImageStore.Finish(img);
-                    Done(path);
+                    var screen = ScreenGrab.ScreenUnderCursor();
+                    using (var img = ScreenGrab.Capture(screen.Bounds)) path = ImageStore.Finish(img);
                 }
+                catch (Exception ex) { Toast.Show("Erreur : " + ex.Message, 4000); }
+                finally { Done(path); }
             });
         }
 
         void CaptureScrolling()
         {
-            Run(() =>
-            {
-                var sc = new ScrollCapture(Done);
-                sc.Start();
-                // The selection may be cancelled: release the lock shortly after
-                var t = new System.Windows.Forms.Timer { Interval = 400 };
-                t.Tick += (s, e) => { t.Stop(); t.Dispose(); busy = false; };
-                t.Start();
-            });
+            // ScrollCapture always ends with onDone (result, cancellation or error): that releases busy
+            Run(() => new ScrollCapture(Done).Start());
         }
 
         void Delayed(int seconds, Action action)

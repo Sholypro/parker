@@ -109,6 +109,7 @@ namespace Parker
                 m.Items.Add("Taille réelle", null, (s, a) => SetZoom(1f));
                 m.Items.Add(new ToolStripSeparator());
                 m.Items.Add("Fermer", null, (s, a) => Close());
+                m.Closed += (s, a) => ThumbnailForm.DisposeLater(m);
                 m.Show(this, e.Location);
             }
         }

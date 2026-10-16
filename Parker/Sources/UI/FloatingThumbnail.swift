@@ -134,7 +134,11 @@ final class FloatingThumbnailController {
         }
         view.onSaveAsGIF = {
             Toast.showActivity(message: "Conversion en GIF…", state: .working)
-            GIFExporter.exportToGIF(videoURL: url) { result in
+            GIFExporter.exportToGIF(
+                videoURL: url,
+                maxWidth: Defaults.shared.gifMaxWidth,
+                fps: Defaults.shared.gifFrameRate
+            ) { result in
                 switch result {
                 case .success(let gifURL):
                     Defaults.shared.addRecentCapture(gifURL)

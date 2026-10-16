@@ -114,7 +114,7 @@ namespace Parker
 
         public static void Apply(bool enabled, string exe = null)
         {
-            exe = exe ?? Application.ExecutablePath;
+            exe = exe ?? Installer.CurrentExe;
             try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))

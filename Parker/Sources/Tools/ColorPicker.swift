@@ -17,7 +17,7 @@ class ColorPickerTool {
             return
         }
 
-        let window = NSWindow(
+        let window = KeyableOverlayWindow(
             contentRect: screen.frame,
             styleMask: .borderless,
             backing: .buffered,
@@ -40,6 +40,9 @@ class ColorPickerTool {
             self?.overlayWindow = nil
         }
         window.contentView = view
+        // Parker is a menu bar app (usually inactive): activate it so the overlay
+        // really gets keyboard focus and Escape reaches the view's keyDown.
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(view)
 

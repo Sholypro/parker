@@ -14,7 +14,10 @@ struct ParkerApp {
         app.setActivationPolicy(.accessory)
         let delegate = AppDelegate()
         app.delegate = delegate
-        app.run()
+        // NSApplication.delegate is weak: keep the delegate alive for the whole run loop.
+        withExtendedLifetime(delegate) {
+            app.run()
+        }
     }
 }
 

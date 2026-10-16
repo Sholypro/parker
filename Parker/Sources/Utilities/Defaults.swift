@@ -99,12 +99,12 @@ class Defaults {
 
     // GIF export settings
     var gifMaxWidth: Int {
-        get { let v = store.integer(forKey: "gifMaxWidth"); return v > 0 ? v : 800 }
+        get { let v = store.integer(forKey: "gifMaxWidth"); return v > 0 ? v : 640 }
         set { store.set(newValue, forKey: "gifMaxWidth") }
     }
 
     var gifFrameRate: Int {
-        get { let v = store.integer(forKey: "gifFrameRate"); return v > 0 ? v : 20 }
+        get { let v = store.integer(forKey: "gifFrameRate"); return v > 0 ? v : 15 }
         set { store.set(newValue, forKey: "gifFrameRate") }
     }
 
