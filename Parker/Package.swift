@@ -12,8 +12,12 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Parker",
-            dependencies: ["HotKey"],
+            dependencies: ["HotKey", "ThinkingOrbsKit", "BorderBeamKit"],
             path: "Sources"
-        )
+        ),
+        // SwiftUI ports of libraries.dev (MIT, github.com/Jakubantalik/Libraries.dev), vendored.
+        // BorderBeamKit's Metal shaders live in Shaders/ and are compiled by build-app.sh.
+        .target(name: "ThinkingOrbsKit", path: "Vendor/ThinkingOrbsKit"),
+        .target(name: "BorderBeamKit", path: "Vendor/BorderBeamKit"),
     ]
 )

@@ -34,6 +34,23 @@ if [[ -n "${SC_VERSION:-}" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $SC_VERSION" "$APP/Contents/Info.plist"
 fi
 
+# Shaders Metal de l'effet « border beam » (libraries.dev). SwiftPM ne compile pas les .metal :
+# on les compile ici quand le compilateur Metal est là (Xcode complet, comme sur GitHub).
+# Sans lui, Parker fonctionne et affiche une bordure simple à la place de l'effet.
+# PARKER_REQUIRE_SHADERS=1 (publication) : échec si la compilation est impossible.
+if xcrun -sdk macosx -f metal >/dev/null 2>&1; then
+  echo "→ Compilation des shaders Metal…"
+  AIR="$(mktemp -t beam).air"
+  xcrun -sdk macosx metal -mmacosx-version-min=14.0 -c "$PKG/Shaders/BeamShaders.metal" -o "$AIR"
+  xcrun -sdk macosx metallib "$AIR" -o "$APP/Contents/Resources/BorderBeam.metallib"
+  rm -f "$AIR"
+elif [[ "${PARKER_REQUIRE_SHADERS:-0}" == "1" ]]; then
+  echo "→ Compilateur Metal introuvable : impossible de compiler les shaders."
+  exit 1
+else
+  echo "→ Compilateur Metal absent (Xcode non installé) : effet « border beam » remplacé par une bordure simple."
+fi
+
 if [[ -d "$PKG/Support/AppIcon.iconset" ]]; then
   iconutil -c icns "$PKG/Support/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
   /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP/Contents/Info.plist" 2>/dev/null || true

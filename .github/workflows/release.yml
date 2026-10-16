@@ -104,6 +104,7 @@ jobs:
           SC_VERSION: ${{ steps.version.outputs.version }}
           SC_SIGN_IDENTITY: ${{ steps.sign.outputs.identity }}
           SC_HARDENED: ${{ steps.sign.outputs.hardened }}
+          PARKER_REQUIRE_SHADERS: "1"
         run: |
           chmod +x build-app.sh
           if ! ./build-app.sh --no-install > build.log 2>&1; then
@@ -114,6 +115,7 @@ jobs:
           fi
           tail -5 build.log
           codesign -dv --verbose=2 dist/Parker.app 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|Runtime|flags" || true
+          test -s dist/Parker.app/Contents/Resources/BorderBeam.metallib
 
       - name: Notariser l'app
         if: steps.version.outputs.skip != 'true' && steps.sign.outputs.notarize == '1'

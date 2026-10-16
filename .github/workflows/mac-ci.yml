@@ -15,3 +15,9 @@ jobs:
       - name: Build
         working-directory: Parker
         run: swift build -c release
+      - name: Shaders Metal
+        working-directory: Parker
+        run: |
+          xcrun -sdk macosx metal -mmacosx-version-min=14.0 -c Shaders/BeamShaders.metal -o "$RUNNER_TEMP/beam.air"
+          xcrun -sdk macosx metallib "$RUNNER_TEMP/beam.air" -o "$RUNNER_TEMP/BorderBeam.metallib"
+          ls -la "$RUNNER_TEMP/BorderBeam.metallib"
