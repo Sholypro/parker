@@ -34,6 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var scrollCapture: ScrollCapture!
     private var onboardingController: OnboardingWindowController!
     private var captureToolbar: CaptureToolbarController!
+    private var captureHistory: CaptureHistoryController!
     private var pinnedWindows: [PinnedImageWindow] = []
     private var shortcutSettingsObserver: NSObjectProtocol?
     private var workspaceActivationObserver: NSObjectProtocol?
@@ -51,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager = HotkeyManager()
         onboardingController = OnboardingWindowController()
         captureToolbar = CaptureToolbarController()
+        captureHistory = CaptureHistoryController()
 
         thumbnailController.onEdit = { [weak self] url in
             self?.editorController.open(imageURL: url)
@@ -85,6 +87,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBarController.onShowAllInOne = { [weak self] in
             self?.captureToolbar.toggle()
+        }
+        menuBarController.onShowHistory = { [weak self] in
+            self?.captureHistory.toggle()
+        }
+        captureHistory.onEdit = { [weak self] url in
+            self?.editorController.open(imageURL: url)
+        }
+        captureHistory.onHistoryChanged = { [weak self] in
+            self?.menuBarController.rebuildMenu()
         }
 
         // Show onboarding on first launch
@@ -149,6 +160,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyManager.onAllInOne = { [weak self] in
             self?.captureToolbar.toggle()
+        }
+        hotkeyManager.onHistory = { [weak self] in
+            self?.captureHistory.toggle()
         }
         hotkeyManager.registerAll()
         SystemScreenshotShortcuts.sync(with: ShortcutCatalog.currentProfile())

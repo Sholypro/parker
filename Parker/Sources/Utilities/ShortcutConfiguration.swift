@@ -55,6 +55,7 @@ enum ShortcutModifierProfile: String, CaseIterable, Identifiable {
 
 enum ShortcutAction: String, CaseIterable, Identifiable {
     case allInOne
+    case history
     case captureFullscreen
     case captureArea
     case captureWindow
@@ -70,6 +71,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .allInOne:
             return "All-in-One Toolbar"
+        case .history:
+            return "Capture History"
         case .captureFullscreen:
             return "Capture Fullscreen"
         case .captureArea:
@@ -93,6 +96,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .allInOne:
             return "square.grid.2x2"
+        case .history:
+            return "clock.arrow.circlepath"
         case .captureFullscreen:
             return "rectangle.dashed"
         case .captureArea:
@@ -116,6 +121,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .allInOne:
             return .one
+        case .history:
+            return .h
         case .captureFullscreen:
             return .three
         case .captureArea:
@@ -139,6 +146,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .allInOne:
             return "1"
+        case .history:
+            return "h"
         case .captureFullscreen:
             return "3"
         case .captureArea:
@@ -158,7 +167,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         }
     }
 
-    static let quickAccess: [ShortcutAction] = [.allInOne]
+    static let quickAccess: [ShortcutAction] = [.allInOne, .history]
     static let capture: [ShortcutAction] = [.captureFullscreen, .captureArea, .captureWindow, .captureScrolling]
     static let recording: [ShortcutAction] = [.recordScreen, .recordArea]
     static let tools: [ShortcutAction] = [.ocr, .colorPicker]
@@ -171,8 +180,8 @@ struct ShortcutDefinition {
     var key: Key { action.key }
     var keyEquivalent: String { action.keyEquivalent }
     var modifiers: NSEvent.ModifierFlags { profile.modifiers }
-    var symbol: String { "\(profile.symbolPrefix)\(action.keyEquivalent)" }
-    var text: String { "\(profile.textPrefix)\(action.keyEquivalent)" }
+    var symbol: String { "\(profile.symbolPrefix)\(action.keyEquivalent.uppercased())" }
+    var text: String { "\(profile.textPrefix)\(action.keyEquivalent.uppercased())" }
 }
 
 enum ShortcutCatalog {

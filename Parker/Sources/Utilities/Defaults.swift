@@ -130,6 +130,10 @@ class Defaults {
         recentCaptures = recent
     }
 
+    func removeRecentCapture(_ url: URL) {
+        recentCaptures = recentCaptures.filter { $0 != url }
+    }
+
     func clearRecentCaptures() {
         store.removeObject(forKey: "recentCaptures")
     }

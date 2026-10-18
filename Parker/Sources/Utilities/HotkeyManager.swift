@@ -13,6 +13,7 @@ class HotkeyManager {
     var onOCR: (() -> Void)?
     var onColorPicker: (() -> Void)?
     var onAllInOne: (() -> Void)?
+    var onHistory: (() -> Void)?
 
     func registerAll() {
         unregisterAll()
@@ -38,6 +39,8 @@ class HotkeyManager {
         switch action {
         case .allInOne:
             return onAllInOne
+        case .history:
+            return onHistory
         case .captureFullscreen:
             return onCaptureFullscreen
         case .captureArea:

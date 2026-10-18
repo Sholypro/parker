@@ -286,7 +286,7 @@ final class FloatingThumbnailController {
 
     // MARK: - Actions
 
-    private static func copy(url: URL) {
+    static func copy(url: URL) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         if let image = NSImage(contentsOf: url), !["mp4", "mov", "m4v"].contains(url.pathExtension.lowercased()) {

@@ -13,6 +13,7 @@ class MenuBarController {
     private var appBeforeMenuInteraction: NSRunningApplication?
     var prepareForCapture: (_ preferredApp: NSRunningApplication?, _ action: @escaping () -> Void) -> Void = { _, action in action() }
     var onShowAllInOne: (() -> Void)?
+    var onShowHistory: (() -> Void)?
 
     init(captureEngine: ScreenCaptureEngine,
          thumbnailController: FloatingThumbnailController,
@@ -153,6 +154,8 @@ class MenuBarController {
         menu.addItem(NSMenuItem.separator())
 
         // Recent Captures
+        menu.addItem(makeItem("Historique des captures", icon: "square.grid.3x2", action: #selector(showHistory), shortcutAction: .history))
+
         let recent = NSMenuItem(title: "Captures récentes", action: nil, keyEquivalent: "")
         recent.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
         recent.submenu = buildRecentCapturesMenu()
@@ -425,6 +428,10 @@ class MenuBarController {
 
         rebuildMenu()
         Toast.show(message: newState ? "Icônes du bureau masquées" : "Icônes du bureau affichées")
+    }
+
+    @objc private func showHistory() {
+        onShowHistory?()
     }
 
     @objc private func showAllInOne() {

@@ -514,12 +514,13 @@ struct ShortcutSettingsPage: View {
 
     private func badge(for action: ShortcutAction) -> String {
         let modifier = profile == .controlShift ? "⌃" : "⌘"
-        return "\(modifier)  ⇧  \(action.keyEquivalent)"
+        return "\(modifier)  ⇧  \(action.keyEquivalent.uppercased())"
     }
 
     static func frenchTitle(_ action: ShortcutAction) -> String {
         switch action {
         case .allInOne: return "Ouvrir la barre d’outils"
+        case .history: return "Historique des captures"
         case .captureFullscreen: return "Capturer tout l’écran"
         case .captureArea: return "Capturer une zone"
         case .captureWindow: return "Capturer une fenêtre"
