@@ -254,3 +254,27 @@ jobs:
           files: |
             Parker-Windows-Installer.exe
             Parker-Windows.zip
+
+  # Libellés affichés sur la page de la release. Le nom du fichier (lu par les apps installées)
+  # ne change pas : seul le texte affiché sur GitHub change.
+  labels:
+    needs: [build, windows]
+    if: needs.build.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Libellés des fichiers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: v${{ needs.build.outputs.version }}
+        run: |
+          label() {
+            id="$(gh api "repos/$REPO/releases/tags/$TAG" --jq ".assets[] | select(.name == \"$1\") | .id")"
+            [ -n "$id" ] && gh api -X PATCH "repos/$REPO/releases/assets/$id" -f name="$1" -f label="$2" --jq '.name + " : " + .label'
+          }
+          label Parker-Mac-Installer.dmg     "Parker-Mac-Installer.dmg (installer Parker sur Mac)"
+          label Parker-Windows-Installer.exe "Parker-Windows-Installer.exe (installer Parker sur Windows)"
+          label Parker-Mac.zip               "Parker-Mac.zip (mise à jour automatique, pas à télécharger)"
+          label Parker-Windows.zip           "Parker-Windows.zip (mise à jour automatique, pas à télécharger)"
