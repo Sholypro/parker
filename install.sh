@@ -4,11 +4,11 @@
 set -euo pipefail
 
 REPO="Sholypro/parker"
-URL="https://github.com/${REPO}/releases/latest/download/Parker.zip"
+URL="https://github.com/${REPO}/releases/latest/download/Parker-Mac.zip"
 TARGET="/Applications/Parker.app"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "Ce script est pour Mac. Sur Windows, télécharge Parker-Setup.exe : https://github.com/${REPO}/releases/latest"
+  echo "Ce script est pour Mac. Sur Windows, télécharge Parker-Windows-Installer.exe : https://github.com/${REPO}/releases/latest"
   exit 1
 fi
 
@@ -16,8 +16,8 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 echo "Téléchargement de Parker…"
-curl -fL --progress-bar -o "${WORK}/Parker.zip" "$URL"
-/usr/bin/ditto -x -k "${WORK}/Parker.zip" "$WORK"
+curl -fL --progress-bar -o "${WORK}/Parker-Mac.zip" "$URL"
+/usr/bin/ditto -x -k "${WORK}/Parker-Mac.zip" "$WORK"
 if [[ ! -d "${WORK}/Parker.app" ]]; then
   echo "Archive inattendue : Parker.app introuvable."
   exit 1

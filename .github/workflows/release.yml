@@ -2,12 +2,13 @@
 # Déclencheur : un push sur main qui change le numéro de version dans Parker/Support/Info.plist
 # (ou un lancement manuel depuis l'onglet Actions).
 #
-# Fichiers publiés dans la Release :
-#   Parker.dmg           installation Mac (glisser Parker dans Applications)
-#   Parker-Setup.exe     installation Windows (s'installe tout seul au premier lancement)
-#   Parker.zip           archive Mac lue par la mise à jour intégrée
-#   Parker-Mac.zip       copie de Parker.zip pour les versions Mac jusqu'à 2.1
-#   Parker-Windows.zip   archive Windows lue par la mise à jour intégrée
+# Fichiers publiés dans la Release (triés par nom, groupés par système) :
+#   Parker-Mac-Installer.dmg       à télécharger sur Mac (glisser Parker dans Applications)
+#   Parker-Mac.zip                 mise à jour automatique Mac (toutes les versions déjà installées le lisent)
+#   Parker-Windows-Installer.exe   à télécharger sur Windows (s'installe tout seul au premier lancement)
+#   Parker-Windows.zip             mise à jour automatique Windows (nom attendu par l'app, ne pas renommer)
+# Les versions Mac jusqu'à 2.1 prennent le premier .zip par ordre alphabétique : Parker-Mac.zip
+# doit donc rester avant Parker-Windows.zip, et aucun autre .zip ne doit être publié.
 #
 # Signature (tout est optionnel, la publication marche sans) :
 #   SIGNING_P12_BASE64 / SIGNING_P12_PASSWORD
@@ -130,7 +131,7 @@ jobs:
           xcrun stapler staple dist/Parker.app
           spctl -a -vv dist/Parker.app
 
-      - name: Créer Parker.dmg et les archives
+      - name: Créer Parker-Mac-Installer.dmg et les archives
         if: steps.version.outputs.skip != 'true'
         env:
           SC_SIGN_IDENTITY: ${{ steps.sign.outputs.identity }}
@@ -143,15 +144,15 @@ jobs:
           if [ "$NOTARIZE" != "1" ]; then
             cp packaging/mac/Lisez-moi.txt "$STAGE/Lisez-moi.txt"
           fi
-          hdiutil create -volname "Parker" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov Parker.dmg
+          hdiutil create -volname "Parker" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov Parker-Mac-Installer.dmg
           # Le .dmg n'est signé qu'avec un Developer ID (notarisation) : signé avec un certificat
           # non reconnu par Apple ("Parker Local"), macOS refuse même d'ouvrir l'image disque.
           if [ "$NOTARIZE" = "1" ] && [ -n "$SC_SIGN_IDENTITY" ]; then
-            codesign --force --timestamp --sign "$SC_SIGN_IDENTITY" Parker.dmg
+            codesign --force --timestamp --sign "$SC_SIGN_IDENTITY" Parker-Mac-Installer.dmg
           fi
-          hdiutil verify Parker.dmg
-          ditto -c -k --keepParent dist/Parker.app Parker.zip
-          ls -la Parker.dmg Parker.zip
+          hdiutil verify Parker-Mac-Installer.dmg
+          ditto -c -k --keepParent dist/Parker.app Parker-Mac.zip
+          ls -la Parker-Mac-Installer.dmg Parker-Mac.zip
 
       - name: Notariser le DMG
         if: steps.version.outputs.skip != 'true' && steps.sign.outputs.notarize == '1'
@@ -160,9 +161,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          xcrun notarytool submit Parker.dmg --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+          xcrun notarytool submit Parker-Mac-Installer.dmg --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_APP_PASSWORD" --wait
-          xcrun stapler staple Parker.dmg
+          xcrun stapler staple Parker-Mac-Installer.dmg
 
       - name: Notes de version
         if: steps.version.outputs.skip != 'true'
@@ -176,8 +177,8 @@ jobs:
             if [ "$NOTARIZE" != "1" ]; then
               echo "- **Mac, sans alerte (recommandé)** : ouvrir Terminal, coller \`curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | bash\` puis Entrée."
             fi
-            echo "- **Mac** (macOS 14 ou plus récent) : [Parker.dmg](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker.dmg) : ouvrir, puis glisser Parker dans Applications."
-            echo "- **Windows** (10 version 2004 ou plus récent, 11) : [Parker-Setup.exe](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Setup.exe) : lancer, Parker s'installe tout seul."
+            echo "- **Mac** (macOS 14 ou plus récent) : [Parker-Mac-Installer.dmg](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Mac-Installer.dmg) : ouvrir, puis glisser Parker dans Applications."
+            echo "- **Windows** (10 version 2004 ou plus récent, 11) : [Parker-Windows-Installer.exe](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Windows-Installer.exe) : lancer, Parker s'installe tout seul."
             echo
             echo "Déjà installé ? Menu Parker > **Rechercher des mises à jour…**"
             echo
@@ -187,7 +188,7 @@ jobs:
               echo "- **Windows** : si SmartScreen affiche « Windows a protégé votre ordinateur », cliquer sur **Informations complémentaires**, puis **Exécuter quand même**."
               echo
             fi
-            echo "Les autres fichiers (.zip) servent à la mise à jour automatique."
+            echo "Les fichiers **.zip** servent uniquement à la mise à jour automatique de l'app : inutile de les télécharger."
           } > release-notes.md
           cat release-notes.md
 
@@ -200,8 +201,8 @@ jobs:
           name: Parker ${{ steps.version.outputs.version }}
           body_path: release-notes.md
           files: |
-            Parker.dmg
-            Parker.zip
+            Parker-Mac-Installer.dmg
+            Parker-Mac.zip
 
   windows:
     needs: build
@@ -242,33 +243,14 @@ jobs:
       - name: Préparer les fichiers
         shell: pwsh
         run: |
-          Copy-Item out/Parker.exe Parker-Setup.exe
+          Copy-Item out/Parker.exe Parker-Windows-Installer.exe
           Compress-Archive -Path out/Parker.exe -DestinationPath Parker-Windows.zip
-          Get-Item Parker-Setup.exe, Parker-Windows.zip | Select-Object Name, Length
+          Get-Item Parker-Windows-Installer.exe, Parker-Windows.zip | Select-Object Name, Length
 
       - name: Ajouter à la release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.build.outputs.version }}
           files: |
-            Parker-Setup.exe
+            Parker-Windows-Installer.exe
             Parker-Windows.zip
-
-  # Copie de l'archive Mac sous le nom Parker-Mac.zip, publiée en dernier : les versions Mac
-  # jusqu'à 2.1 prennent la première archive .zip de la release, qui doit donc être celle du Mac.
-  mac-alias:
-    needs: [build, windows]
-    if: needs.build.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Publier Parker-Mac.zip
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag="v${{ needs.build.outputs.version }}"
-          gh release download "$tag" -R "${{ github.repository }}" -p Parker.zip
-          mv Parker.zip Parker-Mac.zip
-          gh release upload "$tag" Parker-Mac.zip -R "${{ github.repository }}" --clobber
-          gh api "repos/${{ github.repository }}/releases/tags/$tag" --jq '.assets[].name'

@@ -7,8 +7,8 @@ Outil de capture d'écran pour Mac et Windows, dans l'esprit de CleanShot X. Bas
 | | Fichier | Installation |
 |---|---|---|
 | **Mac** (macOS 14 ou plus récent), **recommandé** | Commande Terminal ci-dessous | Aucune alerte de sécurité |
-| **Mac** (macOS 14 ou plus récent) | **[Parker.dmg](https://github.com/Sholypro/parker/releases/latest/download/Parker.dmg)** | Ouvrir le .dmg, glisser Parker dans Applications, puis « Ouvrir quand même » une fois |
-| **Windows** (10 version 2004 ou plus récent, 11) | **[Parker-Setup.exe](https://github.com/Sholypro/parker/releases/latest/download/Parker-Setup.exe)** | Lancer le fichier : Parker s'installe tout seul |
+| **Mac** (macOS 14 ou plus récent) | **[Parker-Mac-Installer.dmg](https://github.com/Sholypro/parker/releases/latest/download/Parker-Mac-Installer.dmg)** | Ouvrir le .dmg, glisser Parker dans Applications, puis « Ouvrir quand même » une fois |
+| **Windows** (10 version 2004 ou plus récent, 11) | **[Parker-Windows-Installer.exe](https://github.com/Sholypro/parker/releases/latest/download/Parker-Windows-Installer.exe)** | Lancer le fichier : Parker s'installe tout seul |
 
 Ces liens pointent toujours vers la dernière version. Toutes les versions : [page des releases](https://github.com/Sholypro/parker/releases).
 
@@ -36,7 +36,7 @@ Automatiques sur Mac et Windows : Parker vérifie au lancement (au plus une fois
 
 ## Version Windows
 
-* **Installation :** `Parker-Setup.exe` s'installe dans `%LOCALAPPDATA%\Programs\Parker` (sans droits admin), ajoute un raccourci au menu Démarrer, affiche un message de confirmation puis démarre. Le fichier téléchargé peut ensuite être supprimé. Désinstallation : Paramètres > Applications > Applications installées > Parker.
+* **Installation :** `Parker-Windows-Installer.exe` s'installe dans `%LOCALAPPDATA%\Programs\Parker` (sans droits admin), ajoute un raccourci au menu Démarrer, affiche un message de confirmation puis démarre. Le fichier téléchargé peut ensuite être supprimé. Désinstallation : Paramètres > Applications > Applications installées > Parker.
 * **Utilisation :** Parker vit dans la zone de notification (à côté de l'horloge, parfois derrière la petite flèche ^). Clic sur l'icône = menu.
 * **Raccourcis :** `Ctrl+Maj+4` zone · `Ctrl+Maj+3` écran · `Ctrl+Maj+5` fenêtre · `Ctrl+Maj+6` capture défilante · `Ctrl+Maj+7` épingler la dernière capture.
 * **Captures :** enregistrées dans `Images\Parker` (modifiable dans les Réglages), et copiées dans le presse-papiers.
