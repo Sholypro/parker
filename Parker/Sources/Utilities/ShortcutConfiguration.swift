@@ -21,7 +21,7 @@ enum ShortcutModifierProfile: String, CaseIterable, Identifiable {
         case .controlShift:
             return "Recommended. Avoids duplicate captures from Apple's built-in screenshot shortcuts."
         case .commandShift:
-            return "Matches macOS screenshot keys. Disable Apple's screenshot shortcuts first to avoid conflicts."
+            return "Matches macOS screenshot keys. Parker turns Apple's Cmd+Shift+3/4/5 off while it runs and back on when it quits."
         }
     }
 

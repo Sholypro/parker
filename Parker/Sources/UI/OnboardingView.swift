@@ -143,7 +143,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Parker cannot suppress Apple's screenshot shortcuts directly. The recommended profile avoids the built-in Cmd+Shift+3/4/5 conflicts.")
+                Text("Ctrl+Shift never touches macOS. With Cmd+Shift, Parker switches Apple's own screenshot shortcuts off while it runs, so only Parker opens.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

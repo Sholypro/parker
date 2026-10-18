@@ -486,7 +486,9 @@ struct ShortcutSettingsPage: View {
 
             Text(profile == .controlShift
                  ? "Ctrl + Maj évite les raccourcis de capture de macOS."
-                 : "⌘ + Maj : désactivez d’abord les raccourcis de capture de macOS.")
+                 : (SystemScreenshotShortcuts.isSupported
+                    ? "⌘ + Maj : Parker coupe les raccourcis de capture de macOS tant qu’il est ouvert, et les rétablit en quittant."
+                    : "⌘ + Maj : désactivez d’abord les raccourcis de capture de macOS."))
                 .font(.system(size: 12))
                 .foregroundColor(SettingsColor.muted)
 

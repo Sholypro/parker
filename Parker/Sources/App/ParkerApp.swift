@@ -151,6 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.captureToolbar.toggle()
         }
         hotkeyManager.registerAll()
+        SystemScreenshotShortcuts.sync(with: ShortcutCatalog.currentProfile())
     }
 
     private func observeShortcutSettings() {
@@ -160,6 +161,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             self?.hotkeyManager.registerAll()
+            SystemScreenshotShortcuts.sync(with: ShortcutCatalog.currentProfile())
             self?.menuBarController.rebuildMenu()
         }
     }
@@ -207,6 +209,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        SystemScreenshotShortcuts.restore()
         if let shortcutSettingsObserver {
             NotificationCenter.default.removeObserver(shortcutSettingsObserver)
         }
