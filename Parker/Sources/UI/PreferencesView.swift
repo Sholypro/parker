@@ -279,6 +279,7 @@ struct SettingsNavItem: View {
 struct GeneralSettingsPage: View {
     @StateObject private var launchAtLogin = LaunchAtLoginManager()
     @AppStorage("saveLocation") private var saveLocationPath: String = NSHomeDirectory() + "/Desktop"
+    @State private var saveToFolder: Bool = Defaults.shared.saveToFolder
     @AppStorage("imageFormat") private var imageFormat: String = "png"
     @AppStorage("copyToClipboard") private var copyToClipboard: Bool = true
     @AppStorage("playSound") private var playSound: Bool = true
@@ -292,9 +293,26 @@ struct GeneralSettingsPage: View {
             SettingsHeader(title: "À votre façon.", subtitle: "Les essentiels, au même endroit.")
 
             SettingsGroup(title: "FICHIERS") {
-                SettingsRow(title: "Enregistrer dans", subtitle: folderDescription) {
+                SettingsRow(
+                    title: "Enregistrer dans un dossier",
+                    subtitle: saveToFolder
+                        ? "Chaque capture est aussi enregistrée en fichier."
+                        : "Désactivé : presse-papiers et historique (20 dernières) seulement."
+                ) {
+                    SettingsSwitch(isOn: Binding(
+                        get: { saveToFolder },
+                        set: {
+                            saveToFolder = $0
+                            Defaults.shared.saveToFolder = $0
+                        }
+                    ))
+                }
+                SettingsDivider()
+                SettingsRow(title: "Dossier", subtitle: folderDescription) {
                     SettingsPillButton(title: "Modifier…") { chooseSaveLocation() }
                 }
+                .opacity(saveToFolder ? 1 : 0.45)
+                .disabled(!saveToFolder)
                 SettingsDivider()
                 SettingsRow(title: "Format d’image", subtitle: formatDescription) {
                     SettingsChoice(
@@ -595,7 +613,7 @@ struct ExportSettingsPage: View {
         alert.alertStyle = .warning
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let defaults = UserDefaults.standard
-        for key in ["saveLocation", "imageFormat", "jpegQuality", "copyToClipboard", "showThumbnail", "playSound",
+        for key in ["saveLocation", "saveToFolder", "imageFormat", "jpegQuality", "copyToClipboard", "showThumbnail", "playSound",
                     "includeWindowShadow", "thumbnailDuration", "thumbnailAutoHide", "captureDelay", "hideDesktopIcons",
                     "thumbnailPosition", "freezeScreen", "gifMaxWidth", "gifFrameRate", "shortcutProfile"] {
             defaults.removeObject(forKey: key)

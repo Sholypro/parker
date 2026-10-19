@@ -297,7 +297,7 @@ final class FloatingThumbnailController {
         Toast.show(message: "Copié dans le presse-papiers")
     }
 
-    private static func saveAs(url: URL) {
+    static func saveAs(url: URL) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = url.lastPathComponent
         panel.canCreateDirectories = true

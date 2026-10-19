@@ -9,6 +9,8 @@ namespace Parker
     internal sealed class SettingsForm : Form
     {
         readonly TextBox folder = new TextBox { Width = 300 };
+        readonly CheckBox saveToFolder = new CheckBox { Text = "Enregistrer aussi chaque capture dans un dossier", AutoSize = true };
+        readonly Label storageHint = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, 0, 0, 6) };
         readonly ComboBox format = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
         readonly CheckBox copy = new CheckBox { Text = "Copier automatiquement dans le presse-papiers", AutoSize = true };
         readonly CheckBox thumb = new CheckBox { Text = "Afficher les vignettes flottantes", AutoSize = true };
@@ -34,6 +36,7 @@ namespace Parker
 
             var s = Settings.Current;
             folder.Text = s.SaveFolder;
+            saveToFolder.Checked = s.SaveToFolder;
             format.Items.AddRange(new object[] { "PNG", "JPEG" });
             format.SelectedIndex = s.ImageFormat == "jpg" ? 1 : 0;
             copy.Checked = s.CopyToClipboard;
@@ -65,6 +68,17 @@ namespace Parker
             var folderRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             folderRow.Controls.Add(folder);
             folderRow.Controls.Add(browse);
+            Action syncStorage = () =>
+            {
+                folderRow.Enabled = saveToFolder.Checked;
+                storageHint.Text = saveToFolder.Checked
+                    ? "Chaque capture est aussi enregistrée en fichier dans ce dossier."
+                    : "Désactivé : presse-papiers et historique (20 dernières) seulement.";
+            };
+            saveToFolder.CheckedChanged += (o, e) => syncStorage();
+            syncStorage();
+            row("", saveToFolder);
+            row("", storageHint);
             row("Dossier des captures", folderRow);
             row("Format", format);
             row("", copy);
@@ -95,6 +109,7 @@ namespace Parker
         {
             var s = Settings.Current;
             if (!string.IsNullOrWhiteSpace(folder.Text)) s.SaveFolder = folder.Text.Trim();
+            s.SaveToFolder = saveToFolder.Checked;
             s.ImageFormat = format.SelectedIndex == 1 ? "jpg" : "png";
             s.CopyToClipboard = copy.Checked;
             s.ShowThumbnail = thumb.Checked;

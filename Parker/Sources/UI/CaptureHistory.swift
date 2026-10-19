@@ -42,6 +42,10 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
             self?.dismiss()
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
+        model.onSaveAs = { [weak self] url in
+            self?.dismiss()
+            FloatingThumbnailController.saveAs(url: url)
+        }
         model.onRemove = { [weak self] url in
             Defaults.shared.removeRecentCapture(url)
             self?.model.reload()
@@ -236,6 +240,7 @@ final class CaptureHistoryModel: ObservableObject {
     var onOpen: ((URL) -> Void)?
     var onEdit: ((URL) -> Void)?
     var onReveal: ((URL) -> Void)?
+    var onSaveAs: ((URL) -> Void)?
     var onRemove: ((URL) -> Void)?
 
     private static let thumbnailCache = NSCache<NSURL, NSImage>()
@@ -395,6 +400,7 @@ struct CaptureHistoryView: View {
         if item.kind == .image {
             Button("Annoter") { model.onEdit?(item.url) }
         }
+        Button("Enregistrer sous…") { model.onSaveAs?(item.url) }
         Button("Afficher dans le Finder") { model.onReveal?(item.url) }
         Divider()
         Button("Retirer de l’historique") { model.onRemove?(item.url) }

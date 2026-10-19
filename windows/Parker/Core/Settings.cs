@@ -19,6 +19,9 @@ namespace Parker
         static string FilePath { get { return Path.Combine(Dir, "settings.ini"); } }
 
         public string SaveFolder = DefaultSaveFolder();
+        /// <summary>Off by default: captures only go to the clipboard and the history
+        /// (HistoryFolder, 20 files at most). On: they are also written to SaveFolder.</summary>
+        public bool SaveToFolder = false;
         public string ImageFormat = "png";          // png | jpg
         public int JpegQuality = 90;
         public bool CopyToClipboard = true;
@@ -33,6 +36,20 @@ namespace Parker
         public List<string> Recent = new List<string>();
         public bool FirstRunDone = false;
 
+        /// <summary>Parker's own folder for captures not saved to a user folder (history files only).</summary>
+        public static string HistoryFolder
+        {
+            get
+            {
+                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Parker", "History");
+                try { Directory.CreateDirectory(dir); } catch { }
+                return dir;
+            }
+        }
+
+        /// <summary>Where a new capture is written.</summary>
+        public string CaptureFolder { get { return SaveToFolder ? SaveFolder : HistoryFolder; } }
+
         public static string DefaultSaveFolder()
         {
             var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
@@ -43,6 +60,7 @@ namespace Parker
         static Settings Load()
         {
             var s = new Settings();
+            var sawSaveToFolder = false;
             try
             {
                 if (!File.Exists(FilePath)) return s;
@@ -55,6 +73,7 @@ namespace Parker
                     switch (key)
                     {
                         case "SaveFolder": if (val.Length > 0) s.SaveFolder = val; break;
+                        case "SaveToFolder": s.SaveToFolder = val == "1"; sawSaveToFolder = true; break;
                         case "ImageFormat": s.ImageFormat = val == "jpg" ? "jpg" : "png"; break;
                         case "JpegQuality": int.TryParse(val, out s.JpegQuality); break;
                         case "CopyToClipboard": s.CopyToClipboard = val == "1"; break;
@@ -75,6 +94,8 @@ namespace Parker
                 }
             }
             catch { }
+            // Settings saved before this option: keep saving to a folder the user had picked themselves
+            if (!sawSaveToFolder && !string.Equals(s.SaveFolder, DefaultSaveFolder(), StringComparison.OrdinalIgnoreCase)) s.SaveToFolder = true;
             if (s.JpegQuality < 10 || s.JpegQuality > 100) s.JpegQuality = 90;
             if (s.ThumbnailSeconds <= 0) s.ThumbnailSeconds = 6;
             return s;
@@ -88,6 +109,7 @@ namespace Parker
                 var lines = new[]
                 {
                     "SaveFolder=" + SaveFolder,
+                    "SaveToFolder=" + (SaveToFolder ? 1 : 0),
                     "ImageFormat=" + ImageFormat,
                     "JpegQuality=" + JpegQuality,
                     "CopyToClipboard=" + (CopyToClipboard ? 1 : 0),
@@ -109,10 +131,41 @@ namespace Parker
 
         public void AddRecent(string path)
         {
+            var previous = Recent.ToList();
             Recent.Remove(path);
             Recent.Insert(0, path);
             Recent = Recent.Where(File.Exists).Take(20).ToList();
             Save();
+            // The 21st capture leaves the history: its file goes too if Parker owns it
+            DeleteOwned(previous.Where(p => !Recent.Contains(p)));
+        }
+
+        /// <summary>Removes files of the history folder that are no longer in the history. Called at startup.</summary>
+        public void PruneHistoryFolder()
+        {
+            try
+            {
+                var keep = new HashSet<string>(Recent.Select(p => Path.GetFullPath(p)), StringComparer.OrdinalIgnoreCase);
+                foreach (var file in Directory.GetFiles(HistoryFolder))
+                    if (!keep.Contains(Path.GetFullPath(file))) TryDelete(file);
+            }
+            catch { }
+        }
+
+        /// <summary>Deletes only files inside the history folder: captures saved to a user folder are never touched.</summary>
+        static void DeleteOwned(IEnumerable<string> paths)
+        {
+            var owned = Path.GetFullPath(HistoryFolder).TrimEnd('\\') + "\\";
+            foreach (var p in paths)
+            {
+                try { if (Path.GetFullPath(p).StartsWith(owned, StringComparison.OrdinalIgnoreCase)) TryDelete(p); }
+                catch { }
+            }
+        }
+
+        static void TryDelete(string path)
+        {
+            try { File.Delete(path); } catch { }
         }
     }
 }

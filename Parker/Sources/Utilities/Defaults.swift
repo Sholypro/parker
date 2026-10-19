@@ -5,6 +5,37 @@ class Defaults {
 
     private let store = UserDefaults.standard
 
+    /// Off by default: captures only go to the clipboard and the history (Parker's own folder,
+    /// 20 files at most). On: they are also written to `saveLocation` (Desktop by default).
+    /// Users who had picked a folder before this option existed keep saving there.
+    var saveToFolder: Bool {
+        get {
+            if store.object(forKey: "saveToFolder") == nil { return store.string(forKey: "saveLocation") != nil }
+            return store.bool(forKey: "saveToFolder")
+        }
+        set { store.set(newValue, forKey: "saveToFolder") }
+    }
+
+    /// Parker's own folder for captures that are not saved to a user folder:
+    /// ~/Library/Application Support/Parker/History. Holds the history files only.
+    var historyDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+        let url = base.appendingPathComponent("Parker/History", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// Where a new capture or recording is written.
+    var captureDirectory: URL {
+        if saveToFolder {
+            let folder = saveLocation
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            return folder
+        }
+        return historyDirectory
+    }
+
     var saveLocation: URL {
         get {
             if let path = store.string(forKey: "saveLocation") {
@@ -124,18 +155,43 @@ class Defaults {
     }
 
     func addRecentCapture(_ url: URL) {
-        var recent = recentCaptures
+        let previous = recentCaptures
+        var recent = previous
         recent.removeAll { $0 == url }
         recent.insert(url, at: 0)
         recentCaptures = recent
+        // The 21st capture leaves the history: its file goes too if Parker owns it
+        deleteOwnedFiles(previous.filter { !recentCaptures.contains($0) })
     }
 
     func removeRecentCapture(_ url: URL) {
         recentCaptures = recentCaptures.filter { $0 != url }
+        deleteOwnedFiles([url])
     }
 
     func clearRecentCaptures() {
+        let previous = recentCaptures
         store.removeObject(forKey: "recentCaptures")
+        deleteOwnedFiles(previous)
+    }
+
+    /// Removes files of Parker's history folder that are no longer in the history
+    /// (for example the video kept after a GIF export). Call at launch, never during a recording.
+    func pruneHistoryDirectory() {
+        let keep = Set(recentCaptures.map { $0.standardizedFileURL.path })
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: historyDirectory, includingPropertiesForKeys: nil) else { return }
+        for file in files where !keep.contains(file.standardizedFileURL.path) {
+            try? fm.removeItem(at: file)
+        }
+    }
+
+    /// Deletes only files inside Parker's history folder: captures saved to a user folder are never touched.
+    private func deleteOwnedFiles(_ urls: [URL]) {
+        let owned = historyDirectory.standardizedFileURL.path + "/"
+        for url in urls where url.standardizedFileURL.path.hasPrefix(owned) {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 }
 

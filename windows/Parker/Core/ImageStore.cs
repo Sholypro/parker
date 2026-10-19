@@ -51,11 +51,11 @@ namespace Parker
     {
         public static string NewFilePath(string extension)
         {
-            var folder = Settings.Current.SaveFolder;
+            var folder = Settings.Current.CaptureFolder;
             try { Directory.CreateDirectory(folder); }
             catch
             {
-                folder = Settings.DefaultSaveFolder();
+                folder = Settings.HistoryFolder;
                 Directory.CreateDirectory(folder);
             }
             var name = "Capture " + DateTime.Now.ToString("yyyy-MM-dd 'à' HH.mm.ss");

@@ -5,7 +5,7 @@ enum ImageUtilities {
         let defaults = Defaults.shared
         let filename = generateFilename()
         let ext = defaults.imageFormat
-        let url = defaults.saveLocation.appendingPathComponent("\(filename).\(ext)")
+        let url = defaults.captureDirectory.appendingPathComponent("\(filename).\(ext)")
 
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, imageUTType(for: ext), 1, nil) else {
             throw CaptureError.captureFailed

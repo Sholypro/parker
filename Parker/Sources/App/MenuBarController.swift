@@ -390,7 +390,7 @@ class MenuBarController {
     }
 
     @objc private func showRecentInFinder() {
-        NSWorkspace.shared.open(Defaults.shared.saveLocation)
+        NSWorkspace.shared.open(Defaults.shared.captureDirectory)
     }
 
     @objc private func clearRecentCaptures() {

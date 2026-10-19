@@ -41,6 +41,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastActiveExternalApp: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Parker's history folder keeps only the files still in the history (20 at most)
+        Defaults.shared.pruneHistoryDirectory()
+
         captureEngine = ScreenCaptureEngine()
         thumbnailController = FloatingThumbnailController()
         editorController = AnnotationEditorController()

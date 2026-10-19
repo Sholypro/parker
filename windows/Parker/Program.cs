@@ -114,6 +114,8 @@ namespace Parker
             menu.Opening += (s, e) => BuildMenu();
 
             Startup.Apply(Settings.Current.LaunchAtStartup);
+            // The history folder keeps only the files still in the history (20 at most)
+            Settings.Current.PruneHistoryFolder();
 
             if (!Settings.Current.FirstRunDone)
             {
@@ -179,8 +181,9 @@ namespace Parker
             menu.Items.Add(recent);
             item("Ouvrir le dossier des captures", () =>
             {
-                Directory.CreateDirectory(Settings.Current.SaveFolder);
-                Process.Start("explorer.exe", "\"" + Settings.Current.SaveFolder + "\"");
+                var dir = Settings.Current.CaptureFolder;
+                Directory.CreateDirectory(dir);
+                Process.Start("explorer.exe", "\"" + dir + "\"");
             });
             menu.Items.Add(new ToolStripSeparator());
             item("Réglages…", ShowSettings);

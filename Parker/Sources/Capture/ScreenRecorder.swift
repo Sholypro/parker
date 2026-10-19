@@ -191,7 +191,7 @@ class ScreenRecorder: NSObject {
         let recFormatter = DateFormatter()
         recFormatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss.SSS"
         let filename = "Recording \(recFormatter.string(from: Date()))"
-        let url = Defaults.shared.saveLocation.appendingPathComponent("\(filename).mp4")
+        let url = Defaults.shared.captureDirectory.appendingPathComponent("\(filename).mp4")
         recordingURL = url
 
         let writer = try AVAssetWriter(url: url, fileType: .mp4)
