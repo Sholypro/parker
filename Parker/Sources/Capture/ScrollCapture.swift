@@ -22,7 +22,11 @@ class ScrollCapture {
     private var isProcessing = false
     private var autoScrolling = false
     private var autoUnchangedCount = 0
-    private var autoNoMatchCount = 0
+    private var autoRecoveries = 0          // consecutive failed steps, each followed by a step back
+    private var autoSuccessStreak = 0
+    private var autoStepPoints: CGFloat = 0 // current scroll step (adapts to the page)
+    private var autoBaseStep: CGFloat = 0
+    private var lastFrameAt = Date.distantPast // last time the captured area changed (main thread)
     private var lastHeight = 0
     private var lastPreviewTime = Date.distantPast   // workQueue only
     private var recovering = false
@@ -38,7 +42,13 @@ class ScrollCapture {
     private var warningResetWork: DispatchWorkItem?
 
     private let maxOutputHeight = 40_000
-    private let autoSettleDelay: TimeInterval = 0.35
+    // Auto-scroll pacing: after each scroll, wait until the page has stopped moving
+    // (smooth-scrolling apps keep animating for a few hundred ms) before stitching.
+    private let autoMinSettle: TimeInterval = 0.25
+    private let autoIdleTime: TimeInterval = 0.18
+    private let autoMaxSettle: TimeInterval = 1.2
+    private let autoMinStep: CGFloat = 60
+    private let autoMaxRecoveries = 4
     private let previewInterval: TimeInterval = 0.25
 
     private var pixelScale: CGFloat { source?.pixelScale ?? 2 }
@@ -90,7 +100,7 @@ class ScrollCapture {
         isProcessing = false
         autoScrolling = false
         autoUnchangedCount = 0
-        autoNoMatchCount = 0
+        autoRecoveries = 0
         lastHeight = 0
         recovering = false
 
@@ -102,7 +112,10 @@ class ScrollCapture {
 
         let source = ScrollFrameSource(rect: captureRect)
         source.onFrame = { [weak self] in
-            DispatchQueue.main.async { self?.processPendingFrames() }
+            DispatchQueue.main.async {
+                self?.lastFrameAt = Date()
+                self?.processPendingFrames()
+            }
         }
         self.source = source
         source.start { [weak self] ok in
@@ -214,7 +227,11 @@ class ScrollCapture {
 
         autoScrolling = true
         autoUnchangedCount = 0
-        autoNoMatchCount = 0
+        autoRecoveries = 0
+        autoSuccessStreak = 0
+        // 40 % of the area: leaves enough overlap even under a sticky header
+        autoBaseStep = max(autoMinStep, captureRect.height * 0.4)
+        autoStepPoints = autoBaseStep
         recovering = false
         hudView?.setAuto(true)
         hudView?.setStatus("Auto-scroll en cours…", warning: false)
@@ -232,35 +249,75 @@ class ScrollCapture {
     private func autoStep() {
         guard isCapturing, autoScrolling else { return }
 
-        let amount = max(40, Int(captureRect.height * 0.5))
+        let amount = Int(autoStepPoints.rounded())
         postScroll(points: amount)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + autoSettleDelay) { [weak self] in
-            guard let self = self, self.isCapturing, self.autoScrolling else { return }
+        waitForSettle(since: Date()) { [weak self] in
+            guard let self = self else { return }
             let expected = Int((CGFloat(amount) * self.pixelScale).rounded())
             self.autoProcess(expectedDelta: expected) { [weak self] result in
                 guard let self = self, self.isCapturing, self.autoScrolling else { return }
                 switch result {
                 case .unchanged:
+                    // The page did not move after a full settle: end of the page
                     self.autoUnchangedCount += 1
-                    self.autoNoMatchCount = 0
+                    if self.autoUnchangedCount >= 2 {
+                        self.finishCapture()
+                    } else {
+                        self.autoStep()
+                    }
                 case .noMatch:
-                    self.autoNoMatchCount += 1
+                    self.autoUnchangedCount = 0
+                    self.recoverAutoStep(lastAmount: amount)
                 default:
                     self.autoUnchangedCount = 0
-                    self.autoNoMatchCount = 0
-                }
-
-                if self.autoUnchangedCount >= 2 {
-                    // Nothing moves anymore: end of the page
-                    self.finishCapture()
-                } else if self.autoNoMatchCount >= 3 {
-                    self.autoScrolling = false
-                    self.hudView?.setAuto(false)
-                    self.showWarning("Auto-scroll arrêté : contenu impossible à raccorder")
-                } else {
+                    self.autoRecoveries = 0
+                    self.autoSuccessStreak += 1
+                    // After a few clean steps, go back up to the normal speed
+                    if self.autoSuccessStreak >= 3, self.autoStepPoints < self.autoBaseStep {
+                        self.autoStepPoints = min(self.autoBaseStep, self.autoStepPoints * 1.5)
+                        self.autoSuccessStreak = 0
+                    }
                     self.autoStep()
                 }
+            }
+        }
+    }
+
+    /// The last step went too far to be stitched: scroll back half of it so the view overlaps
+    /// what is already captured (the stitcher re-anchors on it), then continue with a smaller step.
+    private func recoverAutoStep(lastAmount: Int) {
+        autoRecoveries += 1
+        autoSuccessStreak = 0
+        guard autoRecoveries <= autoMaxRecoveries else {
+            autoScrolling = false
+            hudView?.setAuto(false)
+            showWarning("Auto-scroll arrêté : contenu impossible à raccorder")
+            return
+        }
+        autoStepPoints = max(autoMinStep, autoStepPoints / 2)
+        postScroll(points: -max(Int(autoMinStep), lastAmount / 2))
+
+        waitForSettle(since: Date()) { [weak self] in
+            guard let self = self else { return }
+            self.autoProcess(expectedDelta: nil) { [weak self] _ in
+                guard let self = self, self.isCapturing, self.autoScrolling else { return }
+                self.autoStep()
+            }
+        }
+    }
+
+    /// Calls `then` once the captured area has stopped changing (or after `autoMaxSettle`).
+    private func waitForSettle(since start: Date, then: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self = self, self.isCapturing, self.autoScrolling else { return }
+            let now = Date()
+            let elapsed = now.timeIntervalSince(start)
+            let idle = now.timeIntervalSince(self.lastFrameAt)
+            if (elapsed >= self.autoMinSettle && idle >= self.autoIdleTime) || elapsed >= self.autoMaxSettle {
+                then()
+            } else {
+                self.waitForSettle(since: start, then: then)
             }
         }
     }

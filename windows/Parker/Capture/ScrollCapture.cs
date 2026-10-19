@@ -23,7 +23,7 @@ namespace Parker
         SynchronizationContext ui;
         System.Windows.Forms.Timer keyTimer;
         volatile bool active, auto;
-        int autoUnchanged, autoNoMatch, autoStep;
+        int autoUnchanged, autoRecoveries, autoStreak, autoStep, autoBaseStep;
         HudForm hud;
         BorderForm border;
         PreviewForm preview;
@@ -173,7 +173,10 @@ namespace Parker
                 return;
             }
             auto = true;
-            autoUnchanged = 0; autoNoMatch = 0;
+            autoUnchanged = 0; autoRecoveries = 0; autoStreak = 0;
+            // 120 = one wheel notch (about 3 lines). About a third of the area per step.
+            autoBaseStep = Math.Max(1, Math.Min(6, area.Height / 300)) * 120;
+            autoStep = autoBaseStep;
             hud.SetAuto(true);
             SetStatus("Auto-scroll en cours…", false);
             // Cursor over the content so the wheel events reach the right window
@@ -181,59 +184,132 @@ namespace Parker
             AutoStep();
         }
 
+        // Auto-scroll pacing: after each scroll, keep grabbing until the page has stopped moving
+        // (browsers animate the wheel for a few hundred ms), then stitch every frame seen.
+        const int SettleMinMs = 250, SettleIdleMs = 180, SettleMaxMs = 1200, MinStep = 60, MaxRecoveries = 4;
+
         void AutoStep()
         {
             if (!active || !auto) return;
-            // 120 = one wheel notch (≈ 3 lines). Scroll ~ a third of the area per step.
-            autoStep = Math.Max(1, Math.Min(6, area.Height / 300)) * 120;
+            var amount = autoStep;
             Native.SetCursorPos(area.X + area.Width / 2, area.Y + area.Height / 2);
-            Native.ScrollWheel(-autoStep);
-            var wait = new System.Windows.Forms.Timer { Interval = 320 };
-            wait.Tick += (s, e) =>
+            Native.ScrollWheel(-amount);
+            RunAutoBatch(result =>
             {
-                wait.Stop(); wait.Dispose();
-                if (!active || !auto) return;
-                int? expected;
-                lock (stitchLock) expected = stitcher.LastDelta > 0 ? (int?)stitcher.LastDelta : null;
-                Task.Run(() =>
+                if (result == ScrollStitcher.Result.Unchanged)
                 {
-                    var frame = Grab();
-                    lock (stitchLock)
-                    {
-                        var frames = buffer.Drain();
-                        if (frame != null) frames.Add(frame);
-                        if (!active) { foreach (var f in frames) f.Dispose(); return Tuple.Create(ScrollStitcher.Result.NoMatch, (Bitmap)null, 0); }
-                        var res = stitcher.AddBatch(frames, expected);
-                        Bitmap thumb = null;
-                        if (res == ScrollStitcher.Result.First || res == ScrollStitcher.Result.Appended) thumb = stitcher.Compose(260);
-                        return Tuple.Create(res, thumb, stitcher.TotalHeight);
-                    }
-                }).ContinueWith(t =>
+                    // Nothing moved after a full settle: end of the page
+                    autoUnchanged++;
+                    if (autoUnchanged >= 2) Finish(); else AutoStep();
+                }
+                else if (result == ScrollStitcher.Result.NoMatch)
                 {
-                    if (t.IsFaulted)
-                    {
-                        if (!active) return;
-                        auto = false; hud.SetAuto(false);
-                        SetStatus("Auto-scroll arrêté : erreur de capture", true);
-                        return;
-                    }
-                    var r = t.Result;
-                    Handle(r.Item1, r.Item2, r.Item3);
-                    if (!active || !auto) return;
-                    if (r.Item1 == ScrollStitcher.Result.Unchanged) { autoUnchanged++; autoNoMatch = 0; }
-                    else if (r.Item1 == ScrollStitcher.Result.NoMatch) autoNoMatch++;
-                    else { autoUnchanged = 0; autoNoMatch = 0; }
+                    autoUnchanged = 0;
+                    Recover(amount);
+                }
+                else
+                {
+                    autoUnchanged = 0; autoRecoveries = 0; autoStreak++;
+                    // After a few clean steps, go back up to the normal speed
+                    if (autoStreak >= 3 && autoStep < autoBaseStep) { autoStep = Math.Min(autoBaseStep, autoStep * 3 / 2); autoStreak = 0; }
+                    AutoStep();
+                }
+            });
+        }
 
-                    if (autoUnchanged >= 2) Finish();            // nothing moves: end of page
-                    else if (autoNoMatch >= 3)
-                    {
-                        auto = false; hud.SetAuto(false);
-                        SetStatus("Auto-scroll arrêté : contenu impossible à raccorder", true);
-                    }
-                    else AutoStep();
-                }, TaskScheduler.FromCurrentSynchronizationContext());
-            };
-            wait.Start();
+        /// <summary>The last step went too far to be stitched: scroll back half of it so the view
+        /// overlaps what is already captured (the stitcher re-anchors on it), then use a smaller step.</summary>
+        void Recover(int lastAmount)
+        {
+            autoRecoveries++; autoStreak = 0;
+            if (autoRecoveries > MaxRecoveries)
+            {
+                auto = false; hud.SetAuto(false);
+                SetStatus("Auto-scroll arrêté : contenu impossible à raccorder", true);
+                return;
+            }
+            autoStep = Math.Max(MinStep, autoStep / 2);
+            Native.SetCursorPos(area.X + area.Width / 2, area.Y + area.Height / 2);
+            Native.ScrollWheel(Math.Max(MinStep, lastAmount / 2));
+            RunAutoBatch(_ => AutoStep());
+        }
+
+        /// <summary>Waits for the page to settle, stitches what was seen, then calls next on the UI thread.</summary>
+        void RunAutoBatch(Action<ScrollStitcher.Result> next)
+        {
+            Task.Run(() =>
+            {
+                var frames = GrabUntilSettled();
+                lock (stitchLock)
+                {
+                    var queued = buffer.Drain();
+                    queued.AddRange(frames);
+                    if (!active || !auto) { foreach (var f in queued) f.Dispose(); return Tuple.Create(ScrollStitcher.Result.NoMatch, (Bitmap)null, 0, false); }
+                    var res = stitcher.AddBatch(queued, null);
+                    Bitmap thumb = null;
+                    if (res == ScrollStitcher.Result.First || res == ScrollStitcher.Result.Appended) thumb = stitcher.Compose(260);
+                    return Tuple.Create(res, thumb, stitcher.TotalHeight, true);
+                }
+            }).ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    if (!active) return;
+                    auto = false; hud.SetAuto(false);
+                    SetStatus("Auto-scroll arrêté : erreur de capture", true);
+                    return;
+                }
+                var r = t.Result;
+                if (!r.Item4) { if (r.Item2 != null) r.Item2.Dispose(); return; }
+                Handle(r.Item1, r.Item2, r.Item3);
+                if (!active || !auto) return;
+                next(r.Item1);
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+        }
+
+        /// <summary>Distinct frames grabbed until the area stops changing (or SettleMaxMs).</summary>
+        List<Bitmap> GrabUntilSettled()
+        {
+            var frames = new List<Bitmap>();
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            Bitmap last = null;
+            long lastChange = 0;
+            Thread.Sleep(40);
+            while (active && auto)
+            {
+                var frame = Grab();
+                if (frame != null)
+                {
+                    if (last != null && LooksIdentical(last, frame)) frame.Dispose();
+                    else { frames.Add(frame); last = frame; lastChange = watch.ElapsedMilliseconds; }
+                }
+                var t = watch.ElapsedMilliseconds;
+                if ((t >= SettleMinMs && t - lastChange >= SettleIdleMs) || t >= SettleMaxMs) break;
+                Thread.Sleep(FrameIntervalMs);
+            }
+            // Keep memory bounded on large areas: drop every other intermediate frame
+            while (frames.Count > 12)
+            {
+                for (var i = frames.Count - 2; i >= 1 && frames.Count > 12; i -= 2) { frames[i].Dispose(); frames.RemoveAt(i); }
+            }
+            return frames;
+        }
+
+        /// <summary>Cheap comparison on a 32 x 32 grid of pixels.</summary>
+        static bool LooksIdentical(Bitmap a, Bitmap b)
+        {
+            if (a.Width != b.Width || a.Height != b.Height) return false;
+            const int grid = 32;
+            for (var gy = 0; gy < grid; gy++)
+            {
+                var y = (int)((gy + 0.5) * a.Height / grid);
+                for (var gx = 0; gx < grid; gx++)
+                {
+                    var x = (int)((gx + 0.5) * a.Width / grid);
+                    if (a.GetPixel(x, y).ToArgb() != b.GetPixel(x, y).ToArgb()) return false;
+                }
+            }
+            return true;
         }
 
         void Finish()
