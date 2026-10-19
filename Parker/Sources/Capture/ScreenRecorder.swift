@@ -71,7 +71,8 @@ class ScreenRecorder: NSObject {
                 Task {
                     do {
                         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                        guard let display = self.displayForMouseLocation(content.displays) else {
+                        guard let display = self.display(containing: rect, in: content.displays)
+                                ?? self.displayForMouseLocation(content.displays) else {
                             throw CaptureError.noDisplay
                         }
                         let filter = self.makeFilter(display: display, content: content)
@@ -125,6 +126,23 @@ class ScreenRecorder: NSObject {
         }
     }
 
+    /// Display holding the center of a rect given in CG global coordinates.
+    private func display(containing cgRect: CGRect, in displays: [SCDisplay]) -> SCDisplay? {
+        let center = CGPoint(x: cgRect.midX, y: cgRect.midY)
+        return displays.first(where: { $0.frame.contains(center) })
+    }
+
+    /// Video size in pixels: the display's real pixel density (1x on most ultra-wide monitors,
+    /// 2x on Retina) instead of a fixed 2x, kept within the H.264 limit (4096 x 2304) and even.
+    private static func videoSize(points: CGSize, scale: CGFloat) -> (width: Int, height: Int) {
+        var width = points.width * scale
+        var height = points.height * scale
+        let fit = min(1, 4096 / max(width, 1), 2304 / max(height, 1))
+        width *= fit
+        height *= fit
+        return (max(2, Int(width) & ~1), max(2, Int(height) & ~1))
+    }
+
     private func displayForMouseLocation(_ displays: [SCDisplay]) -> SCDisplay? {
         let mouse = NSEvent.mouseLocation
         let ph = NSScreen.primaryHeight
@@ -156,11 +174,13 @@ class ScreenRecorder: NSObject {
                 height: crop.height
             )
             config.sourceRect = sourceRect
-            config.width = Int(crop.width) * 2
-            config.height = Int(crop.height) * 2
+            let size = Self.videoSize(points: crop.size, scale: CGFloat(filter.pointPixelScale))
+            config.width = size.width
+            config.height = size.height
         } else {
-            config.width = Int(filter.contentRect.width) * 2
-            config.height = Int(filter.contentRect.height) * 2
+            let size = Self.videoSize(points: filter.contentRect.size, scale: CGFloat(filter.pointPixelScale))
+            config.width = size.width
+            config.height = size.height
         }
 
         // Enable system audio capture
@@ -516,16 +536,20 @@ class ScreenRecorder: NSObject {
             height: cgRect.height
         )
 
-        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(nsRect) })
+        let center = NSPoint(x: nsRect.midX, y: nsRect.midY)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) })
+                ?? NSScreen.screens.first(where: { $0.frame.intersects(nsRect) })
                 ?? NSScreen.main else { return }
 
+        // No `screen:` argument here: with it, AppKit reads contentRect relative to that screen's
+        // origin, which shifted the whole overlay on any display that is not the main one.
         let window = NSWindow(
             contentRect: screen.frame,
             styleMask: .borderless,
             backing: .buffered,
-            defer: false,
-            screen: screen
+            defer: false
         )
+        window.setFrame(screen.frame, display: false)
         window.level = .floating
         window.backgroundColor = .clear
         window.isOpaque = false
@@ -540,7 +564,7 @@ class ScreenRecorder: NSObject {
             height: nsRect.height
         )
 
-        let borderView = RecordingBorderView(frame: screen.frame, recordingRect: localRect)
+        let borderView = RecordingBorderView(frame: NSRect(origin: .zero, size: screen.frame.size), recordingRect: localRect)
         window.contentView = borderView
         window.orderFront(nil)
         self.borderWindow = window
