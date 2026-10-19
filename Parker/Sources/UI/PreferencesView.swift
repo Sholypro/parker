@@ -429,6 +429,7 @@ struct CaptureSettingsPage: View {
     @AppStorage("hideDesktopIcons") private var hideDesktopIcons: Bool = false
     @AppStorage("includeWindowShadow") private var includeWindowShadow: Bool = true
     @AppStorage("freezeScreen") private var freezeScreen: Bool = true
+    @AppStorage("recordWithCamera") private var recordWithCamera: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -465,6 +466,12 @@ struct CaptureSettingsPage: View {
                 SettingsDivider()
                 SettingsRow(title: "Figer l’écran à la sélection", subtitle: "Le contenu reste immobile pendant le cadrage.") {
                     SettingsSwitch(isOn: $freezeScreen)
+                }
+            }
+
+            SettingsGroup(title: "ENREGISTREMENT VIDÉO") {
+                SettingsRow(title: "Bulle caméra", subtitle: "Votre webcam dans un rond, dans la vidéo. Touche C pendant l’enregistrement.") {
+                    SettingsSwitch(isOn: $recordWithCamera)
                 }
             }
         }

@@ -28,6 +28,8 @@
     <true/>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Parker a besoin de l'enregistrement de l'écran pour faire des captures.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Parker a besoin de la caméra pour afficher ta bulle webcam dans tes vidéos d'écran.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Parker a besoin du micro pour enregistrer le son avec tes vidéos d'écran.</string>
     <key>NSAccessibilityUsageDescription</key>

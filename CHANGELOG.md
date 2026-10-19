@@ -4,6 +4,9 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.10
+- Bulle caméra dans les enregistrements d'écran : ta webcam dans un rond, que tu peux déplacer et agrandir (double-clic). Bouton caméra ou touche C pendant l'enregistrement (Mac).
+
 ## 2.9
 - La fenêtre de mise à jour affiche enfin la liste des nouveautés, lisible, au lieu du texte brut de la page de téléchargement.
 

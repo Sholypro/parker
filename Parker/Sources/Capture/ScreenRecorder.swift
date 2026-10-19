@@ -43,16 +43,25 @@ class ScreenRecorder: NSObject {
 
     private var activeAreaSelector: AreaSelector?
 
+    // Webcam bubble: a real window kept in the video (see makeFilter)
+    private let cameraBubble = CameraBubble()
+    private var bubbleWindowID: CGWindowID?
+    private var cameraButton: NSButton?
+    private var recordingDisplay: SCDisplay?
+    private var recordingArea: NSRect = .zero   // Cocoa coordinates, where the bubble starts
+
     var onRecordingFinished: ((URL) -> Void)?
 
     func startFullscreen() {
         Task {
             do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                var content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard let display = displayForMouseLocation(content.displays) else {
                     throw CaptureError.noDisplay
                 }
-
+                if await prepareCamera(display: display, cropRect: nil) {
+                    content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                }
                 let filter = makeFilter(display: display, content: content)
                 try await startRecording(filter: filter, display: display)
             } catch {
@@ -70,10 +79,13 @@ class ScreenRecorder: NSObject {
             case .success(let (rect, _)):
                 Task {
                     do {
-                        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                        var content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                         guard let display = self.display(containing: rect, in: content.displays)
                                 ?? self.displayForMouseLocation(content.displays) else {
                             throw CaptureError.noDisplay
+                        }
+                        if await self.prepareCamera(display: display, cropRect: rect) {
+                            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                         }
                         let filter = self.makeFilter(display: display, content: content)
                         try await self.startRecording(filter: filter, display: display, cropRect: rect)
@@ -93,10 +105,112 @@ class ScreenRecorder: NSObject {
     /// Excludes Parker's own application (toolbar, area border, toasts, thumbnails) from the video.
     /// `sharingType = .none` is ignored by ScreenCaptureKit on macOS 15+, so the filter is the only
     /// reliable way to keep these windows out of the recording (same approach as ScreenGrabber).
+    /// The webcam bubble is the one Parker window kept in the video.
     private func makeFilter(display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let ownApps = content.applications.filter { $0.processID == ownPID }
-        return SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
+        let bubble = bubbleWindowID
+        let kept = bubble == nil ? [] : content.windows.filter { $0.windowID == bubble }
+        return SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: kept)
+    }
+
+    // MARK: - Webcam bubble
+
+    /// Remembers where the recording happens and, if the camera option is on, shows the bubble
+    /// before the stream starts. Returns true when the bubble is on screen (content must be re-read).
+    private func prepareCamera(display: SCDisplay, cropRect: CGRect?) async -> Bool {
+        let area = await MainActor.run { () -> NSRect in
+            let area = self.cocoaArea(display: display, cropRect: cropRect)
+            self.recordingDisplay = display
+            self.recordingArea = area
+            return area
+        }
+        guard Defaults.shared.recordWithCamera else { return false }
+        let granted = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.main.async {
+                CameraBubble.requestAccess { continuation.resume(returning: $0) }
+            }
+        }
+        guard granted else {
+            await MainActor.run { self.reportCameraDenied() }
+            return false
+        }
+        let shown = await MainActor.run { () -> Bool in
+            guard self.cameraBubble.show(in: area) else {
+                Toast.show(message: "Aucune caméra trouvée", style: .error)
+                return false
+            }
+            self.bubbleWindowID = self.cameraBubble.windowID
+            return true
+        }
+        if shown {
+            // Let the window server list the new window before reading the shareable content
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        return shown
+    }
+
+    private func cocoaArea(display: SCDisplay, cropRect: CGRect?) -> NSRect {
+        if let crop = cropRect {
+            let ph = NSScreen.primaryHeight
+            return NSRect(x: crop.minX, y: ph - crop.maxY, width: crop.width, height: crop.height)
+        }
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        let screen = NSScreen.screens.first { ($0.deviceDescription[key] as? CGDirectDisplayID) == display.displayID }
+        return (screen ?? NSScreen.main)?.frame ?? .zero
+    }
+
+    private func reportCameraDenied() {
+        Toast.show(message: "Autorise Parker à utiliser la caméra", style: .error, duration: 3)
+        CameraBubble.openCameraPrivacySettings()
+    }
+
+    /// Camera button / C key during a recording.
+    private func toggleCamera() {
+        guard isRecording else { return }
+        if cameraBubble.isVisible {
+            cameraBubble.hide()
+            bubbleWindowID = nil
+            Defaults.shared.recordWithCamera = false
+            updateCameraButton()
+            refreshStreamFilter()
+            return
+        }
+        CameraBubble.requestAccess { [weak self] granted in
+            guard let self = self, self.isRecording else { return }
+            guard granted else { self.reportCameraDenied(); return }
+            guard self.cameraBubble.show(in: self.recordingArea) else {
+                Toast.show(message: "Aucune caméra trouvée", style: .error)
+                return
+            }
+            self.bubbleWindowID = self.cameraBubble.windowID
+            Defaults.shared.recordWithCamera = true
+            self.updateCameraButton()
+            self.refreshStreamFilter()
+        }
+    }
+
+    /// Re-reads the windows on screen so the bubble enters (or leaves) the running video.
+    private func refreshStreamFilter() {
+        guard let stream = stream, let display = recordingDisplay else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
+            let filter = self.makeFilter(display: display, content: content)
+            try? await stream.updateContentFilter(filter)
+        }
+    }
+
+    private func updateCameraButton() {
+        let on = cameraBubble.isVisible
+        cameraButton?.contentTintColor = on ? .systemBlue : .white.withAlphaComponent(0.5)
+        cameraButton?.toolTip = on ? "Masquer la caméra" : "Afficher la caméra"
+    }
+
+    private func hideCamera() {
+        cameraBubble.hide()
+        bubbleWindowID = nil
+        recordingDisplay = nil
     }
 
     /// Cleans up a half-started recording and tells the user why nothing happens.
@@ -120,6 +234,7 @@ class ScreenRecorder: NSObject {
         audioInput = nil
         recordingURL = nil
 
+        hideCamera()
         Toast.show(message: "Impossible de lancer l'enregistrement", style: .error)
         if !CGPreflightScreenCaptureAccess() {
             PermissionAssistant.shared.show()
@@ -306,7 +421,7 @@ class ScreenRecorder: NSObject {
         let screen = screenForMouseLocation() ?? NSScreen.main
         guard let screen = screen else { return }
 
-        let toolbarWidth: CGFloat = 340
+        let toolbarWidth: CGFloat = 388
         let toolbarHeight: CGFloat = 64
 
         let window = NSWindow(
@@ -399,6 +514,17 @@ class ScreenRecorder: NSObject {
         gifButton = gifBtn
         let gifCol = makeButtonColumn(button: gifBtn, shortcut: "G", x: x)
         effectView.addSubview(gifCol)
+        x += 48
+
+        // Webcam bubble toggle + shortcut
+        let cameraBtn = makeToolbarButton(
+            icon: "video.circle", tooltip: "Afficher la caméra",
+            action: #selector(cameraClicked), tint: .white.withAlphaComponent(0.5)
+        )
+        cameraButton = cameraBtn
+        let cameraCol = makeButtonColumn(button: cameraBtn, shortcut: "C", x: x)
+        effectView.addSubview(cameraCol)
+        updateCameraButton()
 
         window.contentView = effectView
 
@@ -424,6 +550,10 @@ class ScreenRecorder: NSObject {
             }
             if char == "g" {
                 self.exportGIFClicked()
+                return nil
+            }
+            if char == "c" {
+                self.toggleCamera()
                 return nil
             }
             return event
@@ -519,6 +649,8 @@ class ScreenRecorder: NSObject {
         toolbarWindow = nil
         borderWindow?.orderOut(nil)
         borderWindow = nil
+        hideCamera()
+        cameraButton = nil
         pauseButton = nil
         gifButton = nil
         timerLabel = nil
@@ -585,6 +717,7 @@ class ScreenRecorder: NSObject {
             stopRecording()
         }
     }
+    @objc private func cameraClicked() { toggleCamera() }
     @objc private func exportGIFClicked() {
         shouldExportGIF.toggle()
         gifButton?.contentTintColor = shouldExportGIF ? .systemPurple : .white.withAlphaComponent(0.5)

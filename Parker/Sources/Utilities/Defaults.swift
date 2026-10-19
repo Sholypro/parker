@@ -128,6 +128,12 @@ class Defaults {
         set { store.set(newValue, forKey: "desktopIconsHidden") }
     }
 
+    /// Webcam bubble in screen recordings (remembered from the last recording).
+    var recordWithCamera: Bool {
+        get { store.bool(forKey: "recordWithCamera") }
+        set { store.set(newValue, forKey: "recordWithCamera") }
+    }
+
     // GIF export settings
     var gifMaxWidth: Int {
         get { let v = store.integer(forKey: "gifMaxWidth"); return v > 0 ? v : 640 }

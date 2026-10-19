@@ -86,7 +86,7 @@ else
   echo "→ Signature ad hoc (lance ./scripts/setup-signing.sh pour garder les autorisations entre les versions)…"
 fi
 if [[ "${SC_HARDENED:-0}" == "1" && "$IDENTITY" != "-" ]]; then
-  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+  codesign --force --options runtime --timestamp --entitlements "$ROOT/packaging/mac/Parker.entitlements" --sign "$IDENTITY" "$APP"
 else
   codesign --force --deep --sign "$IDENTITY" "$APP"
 fi
