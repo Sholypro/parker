@@ -14,7 +14,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build
         working-directory: Parker
-        run: swift build -c release
+        run: |
+          set -o pipefail
+          # Compiler errors also become annotations, readable without the full log
+          swift build -c release 2>&1 | tee "$RUNNER_TEMP/build.log" || {
+            grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -20 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
       - name: Shaders Metal
         working-directory: Parker
         run: |

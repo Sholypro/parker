@@ -322,7 +322,7 @@ class ScrollCapture {
         }
     }
 
-    private func autoProcess(expectedDelta: Int, done: @escaping (ScrollStitcher.AddResult) -> Void) {
+    private func autoProcess(expectedDelta: Int?, done: @escaping (ScrollStitcher.AddResult) -> Void) {
         guard isCapturing, let source = source else { return }
         if isProcessing {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
