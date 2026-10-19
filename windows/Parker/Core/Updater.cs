@@ -97,11 +97,33 @@ namespace Parker
             return Regex.Unescape(m.Groups[1].Value);
         }
 
+        /// <summary>The "new features" part of the release text as plain lines ("• …"): stops at the
+        /// download section and removes Markdown marks (titles, bold, code, [text](link)).</summary>
+        static string FeatureNotes(string body)
+        {
+            var lines = new System.Collections.Generic.List<string>();
+            foreach (var raw in (body ?? "").Replace("\r", "").Split('\n'))
+            {
+                var line = raw.Trim();
+                var plain = line.Replace("#", "").Trim().ToLowerInvariant();
+                if (plain.StartsWith("télécharger") || plain.StartsWith("premier lancement")) break;
+                if (plain.StartsWith("nouveautés")) continue;
+                line = Regex.Replace(line, @"\[([^\]]+)\]\([^)]*\)", "$1");
+                line = line.Replace("**", "").Replace("__", "").Replace("`", "").TrimStart('#').Trim();
+                if (line.StartsWith("- ") || line.StartsWith("* ")) line = "• " + line.Substring(2);
+                if (line.Length == 0 && (lines.Count == 0 || lines[lines.Count - 1].Length == 0)) continue;
+                lines.Add(line);
+            }
+            while (lines.Count > 0 && lines[lines.Count - 1].Length == 0) lines.RemoveAt(lines.Count - 1);
+            return string.Join("\n", lines);
+        }
+
         static void Offer(Release r)
         {
-            var notes = r.Body.Trim();
+            var notes = FeatureNotes(r.Body);
             if (notes.Length > 700) notes = notes.Substring(0, 700) + "…";
-            var text = "Parker " + r.Version.ToString(2) + " est disponible (tu as la " + CurrentText + ").\n\n" + notes +
+            var text = "Parker " + r.Version.ToString(2) + " est disponible (tu as la " + CurrentText + ")." +
+                       (notes.Length > 0 ? "\n\nNouveautés :\n" + notes : "") +
                        "\n\nOui : installer et relancer\nNon : plus tard\nAnnuler : ignorer cette version";
             var answer = MessageBox.Show(text, "Mise à jour de Parker", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Information);
             if (answer == DialogResult.Cancel) { Settings.Current.SkippedVersion = r.Tag; Settings.Current.Save(); return; }

@@ -110,13 +110,34 @@ final class UpdateChecker {
         }.resume()
     }
 
+    /// The "new features" part of the release text, as plain lines ("• …"): stops at the download
+    /// section and removes Markdown marks (titles, bold, code, [text](link)).
+    static func featureNotes(from body: String) -> String {
+        var lines: [String] = []
+        for raw in body.components(separatedBy: .newlines) {
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            let plain = line.replacingOccurrences(of: "#", with: "").trimmingCharacters(in: .whitespaces).lowercased()
+            if plain.hasPrefix("télécharger") || plain.hasPrefix("premier lancement") { break }
+            if plain.hasPrefix("nouveautés") { continue }
+            line = line.replacingOccurrences(of: #"\[([^\]]+)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+            for mark in ["**", "__", "`"] { line = line.replacingOccurrences(of: mark, with: "") }
+            while line.hasPrefix("#") { line.removeFirst() }
+            line = line.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("- ") || line.hasPrefix("* ") { line = "• " + line.dropFirst(2) }
+            if line.isEmpty, lines.last?.isEmpty ?? true { continue }
+            lines.append(line)
+        }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.joined(separator: "\n")
+    }
+
     private func offer(_ release: Release, version: String) {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Parker \(version) est disponible"
-        var notes = (release.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        var notes = Self.featureNotes(from: release.body ?? "")
         if notes.count > 900 { notes = String(notes.prefix(900)) + "…" }
-        alert.informativeText = "Tu as la version \(currentVersion).\n\n" + (notes.isEmpty ? "" : notes)
+        alert.informativeText = "Tu as la version \(currentVersion)." + (notes.isEmpty ? "" : "\n\nNouveautés :\n" + notes)
         alert.addButton(withTitle: "Installer et relancer")
         alert.addButton(withTitle: "Plus tard")
         alert.addButton(withTitle: "Ignorer cette version")

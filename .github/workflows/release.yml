@@ -171,24 +171,31 @@ jobs:
           V: ${{ steps.version.outputs.version }}
           NOTARIZE: ${{ steps.sign.outputs.notarize }}
         run: |
+          # The release text is also what installed apps show in their update window, as plain text
+          # (Parker 2.8 and older show it raw): new features first, no bold, headings or [links](…).
+          NOTES="$(awk -v v="## $V" '$0 == v {on=1; next} /^## / {on=0} on && /^- / {print}' CHANGELOG.md)"
+          [ -n "$NOTES" ] || NOTES="- Corrections et améliorations."
           {
-            echo "## Télécharger Parker $V"
+            echo "Nouveautés de Parker $V"
             echo
+            echo "$NOTES"
+            echo
+            echo "Télécharger Parker $V"
+            echo
+            echo "- Mac (macOS 14 ou plus récent) : ouvrir Parker-Mac-Installer.dmg puis glisser Parker dans Applications."
+            echo "  https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Mac-Installer.dmg"
+            echo "- Windows (10 version 2004 ou plus récent, 11) : lancer Parker-Windows-Installer.exe, Parker s'installe tout seul."
+            echo "  https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Windows-Installer.exe"
             if [ "$NOTARIZE" != "1" ]; then
-              echo "- **Mac, sans alerte (recommandé)** : ouvrir Terminal, coller \`curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | bash\` puis Entrée."
-            fi
-            echo "- **Mac** (macOS 14 ou plus récent) : [Parker-Mac-Installer.dmg](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Mac-Installer.dmg) : ouvrir, puis glisser Parker dans Applications."
-            echo "- **Windows** (10 version 2004 ou plus récent, 11) : [Parker-Windows-Installer.exe](https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/Parker-Windows-Installer.exe) : lancer, Parker s'installe tout seul."
-            echo
-            echo "Déjà installé ? Menu Parker > **Rechercher des mises à jour…**"
-            echo
-            if [ "$NOTARIZE" != "1" ]; then
-              echo "### Premier lancement"
-              echo "- **Mac** : si macOS affiche « Apple n'a pas pu confirmer… », cliquer sur **Terminé**, puis **Réglages Système > Confidentialité et sécurité**, tout en bas : **Ouvrir quand même**."
-              echo "- **Windows** : si SmartScreen affiche « Windows a protégé votre ordinateur », cliquer sur **Informations complémentaires**, puis **Exécuter quand même**."
+              echo "- Mac sans alerte de sécurité : dans Terminal, coller \`curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | bash\` puis Entrée."
               echo
+              echo "Premier lancement"
+              echo
+              echo "- Mac : si macOS affiche « Apple n'a pas pu confirmer… », cliquer sur Terminé, puis Réglages Système > Confidentialité et sécurité, tout en bas : Ouvrir quand même."
+              echo "- Windows : si SmartScreen affiche « Windows a protégé votre ordinateur », cliquer sur Informations complémentaires, puis Exécuter quand même."
             fi
-            echo "Les fichiers **.zip** servent uniquement à la mise à jour automatique de l'app : inutile de les télécharger."
+            echo
+            echo "Déjà installé : menu Parker > Rechercher des mises à jour. Les fichiers .zip servent uniquement à la mise à jour automatique."
           } > release-notes.md
           cat release-notes.md
 
