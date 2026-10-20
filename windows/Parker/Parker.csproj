@@ -11,7 +11,7 @@
     <RootNamespace>Parker</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Parker.ico</ApplicationIcon>
-    <Version>2.14.0</Version>
+    <Version>2.15.0</Version>
     <AssemblyTitle>Parker</AssemblyTitle>
     <Copyright>© 2026 Sholy Design</Copyright>
     <Product>Parker</Product>
