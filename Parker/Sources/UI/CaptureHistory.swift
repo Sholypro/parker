@@ -7,7 +7,9 @@ import ImageIO
 /// Layout from the Figma design "Panneau ancré": header, the selected capture large with its
 /// details and actions, then a film strip of the 20 captures (selected one centered and larger).
 ///
-/// - ← → or the chevrons: browse; click a thumbnail: select it; double-click: copy and close;
+/// Docked at the bottom of the main screen, slides up when it opens.
+/// - ← →, the mouse wheel / two-finger scroll or the chevrons: browse; click a thumbnail: select it;
+///   double-click: copy and close;
 /// - Return or Cmd+C: copy the selected capture and close (the app you were in stays in front);
 /// - drag the preview or a thumbnail into any app; right click: more actions;
 /// - Esc, the shortcut again or a click elsewhere: close.
@@ -65,10 +67,15 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Gap between the panel and the bottom of the screen (above the Dock when it is shown).
+    private let bottomMargin: CGFloat = 14
+    /// Apple-like deceleration (fast start, long soft landing).
+    private let slideInTiming = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+
     func show() {
         guard !isVisible else { return }
-        let mouse = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
+        // Main screen (the one with the menu bar), docked at its bottom like a sheet
+        guard let screen = NSScreen.screens.first ?? NSScreen.main else { return }
 
         model.reload()
 
@@ -79,10 +86,13 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
 
         let frame = NSRect(
             x: screen.visibleFrame.midX - size.width / 2,
-            y: screen.visibleFrame.midY - size.height / 2 + 30,
+            y: screen.visibleFrame.minY + bottomMargin,
             width: size.width,
             height: size.height
         )
+        // Starts just below the bottom edge of the screen, then slides up
+        var startFrame = frame
+        startFrame.origin.y = screen.frame.minY - size.height * 0.35
         let panel = CaptureHistoryPanel(
             contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -93,20 +103,25 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.contentView = hosting
         panel.delegate = self
         panel.onKey = { [weak self] event in self?.handleKey(event) ?? false }
+        panel.onScroll = { [weak self] event in self?.handleScroll(event) }
 
+        // "Reduce motion" (Accessibility): fade in place, no slide
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        panel.setFrame(reduceMotion ? frame : startFrame, display: false)
         panel.alphaValue = 0
         panel.makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.16
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.duration = reduceMotion ? 0.15 : 0.5
+            ctx.timingFunction = slideInTiming
             panel.animator().alphaValue = 1
+            panel.animator().setFrame(frame, display: true)
         }
         self.panel = panel
     }
@@ -115,13 +130,54 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
         guard let panel else { return }
         self.panel = nil
         panel.delegate = nil
+        scrollAccumulator = 0
+        // Slides back down while fading out
+        var endFrame = panel.frame
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            endFrame.origin.y -= min(120, endFrame.height * 0.25)
+        }
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.1
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 1, 1)
             panel.animator().alphaValue = 0
+            panel.animator().setFrame(endFrame, display: true)
         }, completionHandler: {
             panel.orderOut(nil)
         })
+    }
+
+    // MARK: - Mouse wheel / trackpad: browse the captures
+
+    private var scrollAccumulator: CGFloat = 0
+    private var lastScrollStep = Date.distantPast
+
+    private func handleScroll(_ event: NSEvent) {
+        if event.phase == .began || event.phase == .ended || event.phase == .cancelled {
+            scrollAccumulator = 0
+        }
+        // Momentum after a trackpad flick would skip many captures: ignore it
+        guard event.momentumPhase == [] else { return }
+        let dx = event.scrollingDeltaX
+        let dy = event.scrollingDeltaY
+        // Down / right = older captures, up / left = more recent
+        let delta = abs(dx) > abs(dy) ? -dx : -dy
+        guard delta != 0 else { return }
+
+        if !event.hasPreciseScrollingDeltas {
+            // Mouse wheel: one notch = one capture
+            guard Date().timeIntervalSince(lastScrollStep) > 0.06 else { return }
+            lastScrollStep = Date()
+            model.moveSelection(by: delta > 0 ? 1 : -1)
+            return
+        }
+        // Trackpad: one capture every 40 points of movement
+        scrollAccumulator += delta
+        let threshold: CGFloat = 40
+        while abs(scrollAccumulator) >= threshold {
+            let step = scrollAccumulator > 0 ? 1 : -1
+            model.moveSelection(by: step)
+            scrollAccumulator -= CGFloat(step) * threshold
+        }
     }
 
     // A click in another window or app closes the panel.
@@ -169,12 +225,18 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
 /// so the app the user was in stays in front.
 private final class CaptureHistoryPanel: NSPanel {
     var onKey: ((NSEvent) -> Bool)?
+    var onScroll: ((NSEvent) -> Void)?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, onKey?(event) == true { return }
+        if event.type == .scrollWheel, let onScroll {
+            // The wheel browses the captures (the film strip follows the selection)
+            onScroll(event)
+            return
+        }
         super.sendEvent(event)
     }
 }

@@ -4,6 +4,9 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.13
+- Historique : la fenêtre apparaît en bas de l'écran principal en glissant vers le haut, et la molette ou le trackpad fait défiler les captures (Mac).
+
 ## 2.12
 - Nouvelle fenêtre d'historique (Maj + touche du profil + H) : la capture sélectionnée en grand avec son app, sa date, son format et sa taille, les boutons Ouvrir, Copier et Partager, et la pellicule des 20 dernières captures (Mac).
 
