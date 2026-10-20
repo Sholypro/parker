@@ -40,6 +40,7 @@ class CaptureToolbarController {
             defer: false
         )
         backdrop.level = .floating
+        backdrop.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         backdrop.backgroundColor = NSColor.black.withAlphaComponent(0.15)
         backdrop.isOpaque = false
         backdrop.hasShadow = false
@@ -76,6 +77,7 @@ class CaptureToolbarController {
             defer: false
         )
         window.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.backgroundColor = .clear
         window.isOpaque = false
         window.hasShadow = true
@@ -144,8 +146,8 @@ class CaptureToolbarController {
 
         // Small delay so the overlay fully disappears before capture starts
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            // Restore the user's previously active app before capturing
-            appToRestore?.activate()
+            // Give the focus back to the user's app, without switching desktop
+            SpaceSafeFocus.restoreFocus(to: appToRestore)
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 switch action {

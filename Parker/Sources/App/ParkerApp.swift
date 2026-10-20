@@ -205,17 +205,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func prepareForCapture(preferredApp: NSRunningApplication?, action: @escaping () -> Void) {
         let app = preferredApp?.isTerminated == false ? preferredApp : lastActiveExternalApp
+        let parkerInFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
 
-        guard let app, !app.isTerminated else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: action)
+        // Another app is already in front (the usual case): capture right away, without
+        // activating anything (activating an app can switch desktop).
+        guard parkerInFront else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: action)
             return
         }
-
-        if #available(macOS 14.0, *) {
-            app.activate()
-        } else {
-            app.activate(options: [.activateIgnoringOtherApps])
-        }
+        // Parker is in front (settings, menu…): give the focus back without leaving this desktop
+        SpaceSafeFocus.restoreFocus(to: app)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: action)
     }
 

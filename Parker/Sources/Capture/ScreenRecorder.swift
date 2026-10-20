@@ -574,6 +574,7 @@ class ScreenRecorder: NSObject {
         window.hasShadow = true
         window.isMovableByWindowBackground = true
         window.sharingType = .none
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let effectView = NSVisualEffectView(frame: NSRect(origin: .zero, size: NSSize(width: toolbarWidth, height: toolbarHeight)))
         effectView.blendingMode = .behindWindow
@@ -821,6 +822,7 @@ class ScreenRecorder: NSObject {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.sharingType = .none  // Don't appear in the recording
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let localRect = NSRect(
             x: nsRect.origin.x - screen.frame.origin.x,

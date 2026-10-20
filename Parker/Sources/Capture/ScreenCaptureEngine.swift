@@ -158,6 +158,7 @@ class ScreenCaptureEngine {
         window.backgroundColor = .clear
         window.isOpaque = false
         window.hasShadow = true
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let view = NSView(frame: NSRect(origin: .zero, size: NSSize(width: overlaySize, height: overlaySize)))
         view.wantsLayer = true
@@ -238,6 +239,7 @@ class ScreenCaptureEngine {
             defer: false
         )
         flashWindow.level = .screenSaver
+        flashWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         flashWindow.backgroundColor = .white
         flashWindow.alphaValue = 0.6
         flashWindow.orderFront(nil)

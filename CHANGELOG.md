@@ -4,6 +4,9 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.14
+- Correction : une capture pouvait faire changer de bureau (Spaces) et laisser l'écran bloqué entre deux bureaux. Parker ne change plus jamais de bureau pendant une capture (Mac).
+
 ## 2.13
 - Historique : la fenêtre apparaît en bas de l'écran principal en glissant vers le haut, et la molette ou le trackpad fait défiler les captures (Mac).
 

@@ -34,11 +34,9 @@ class WindowSelector {
             self?.completion(result)
         }
         window.contentView = view
-        // Parker is a menu bar app (usually inactive): activate it so the overlay
-        // really gets keyboard focus and Escape reaches the view's keyDown.
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(view)
+        // Parker is a menu bar app (usually inactive): it is activated so the overlay really gets
+        // keyboard focus (Escape), without switching desktop (see SpaceSafeFocus).
+        SpaceSafeFocus.present(window, firstResponder: view)
 
         self.overlayWindow = window
         NSCursor.pointingHand.push()
