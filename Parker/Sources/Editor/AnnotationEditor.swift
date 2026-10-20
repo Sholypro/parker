@@ -261,13 +261,13 @@ class AnnotationEditorController: NSObject, NSWindowDelegate {
         bar.addSubview(cropContainer)
         self.cropBar = cropContainer
 
-        // Zoom / info on the right
-        let infoLabel = NSTextField(labelWithString: "V A R O L T P H B X S N C")
+        // Hint on the right: every tool has a one-key shortcut (shown in its tooltip)
+        let infoLabel = NSTextField(labelWithString: "Survole un outil pour voir sa touche")
         infoLabel.font = .systemFont(ofSize: 10, weight: .medium)
         infoLabel.textColor = .tertiaryLabelColor
-        infoLabel.frame = NSRect(x: width - 170, y: btnY + 4, width: 160, height: 16)
-        infoLabel.toolTip = "Raccourcis outils : une touche suffit (ex : A = flèche, B = flou, S = spotlight)"
-        infoLabel.lineBreakMode = .byTruncatingHead
+        infoLabel.frame = NSRect(x: width - 230, y: btnY + 4, width: 220, height: 16)
+        infoLabel.toolTip = AnnotationToolType.allCases.map { "\(String($0.shortcut).uppercased()) : \($0.label)" }.joined(separator: "\n")
+        infoLabel.lineBreakMode = .byTruncatingTail
         infoLabel.alignment = .right
         infoLabel.autoresizingMask = [.minXMargin]
         bar.addSubview(infoLabel)
