@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.11
+- Avec la bulle caméra, l'enregistrement ne démarre plus tout seul : place ta caméra, puis clique sur Démarrer (ou Entrée).
+- Capture défilante : l'auto-scroll ne ramène plus la souris au centre. Sortir la souris de la zone met l'auto-scroll en pause, il reprend quand elle revient.
+
 ## 2.10
 - Bulle caméra dans les enregistrements d'écran : ta webcam dans un rond, que tu peux déplacer et agrandir (double-clic). Bouton caméra ou touche C pendant l'enregistrement (Mac).
 

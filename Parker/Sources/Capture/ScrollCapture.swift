@@ -27,6 +27,8 @@ class ScrollCapture {
     private var autoStepPoints: CGFloat = 0 // current scroll step (adapts to the page)
     private var autoBaseStep: CGFloat = 0
     private var lastFrameAt = Date.distantPast // last time the captured area changed (main thread)
+    private var autoPausedByMouse = false      // auto-scroll waits for the mouse to come back in the area
+    private var mouseWatchTimer: Timer?
     private var lastHeight = 0
     private var lastPreviewTime = Date.distantPast   // workQueue only
     private var recovering = false
@@ -210,6 +212,7 @@ class ScrollCapture {
 
     private func toggleAutoScroll() {
         guard isCapturing else { return }
+        stopMouseWatch() // the button takes over from the automatic pause
         if autoScrolling {
             autoScrolling = false
             hudView?.setAuto(false)
@@ -236,18 +239,79 @@ class ScrollCapture {
         hudView?.setAuto(true)
         hudView?.setStatus("Auto-scroll en cours…", warning: false)
 
-        // Put the cursor over the content so scroll events reach the right view
-        let center = CGPoint(x: captureRect.midX, y: captureRect.midY)
-        CGWarpMouseCursorPosition(center)
-        CGAssociateMouseAndMouseCursorPosition(1)
+        // Scroll events go to the view under the pointer: when Auto is pressed from the HUD,
+        // the pointer is moved into the area once. It is never moved again afterwards.
+        if !mouseInArea {
+            let center = CGPoint(x: captureRect.midX, y: captureRect.midY)
+            CGWarpMouseCursorPosition(center)
+            CGAssociateMouseAndMouseCursorPosition(1)
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             self?.autoStep()
         }
     }
 
+    // MARK: - Pause when the mouse leaves the area
+
+    private var mouseInArea: Bool {
+        nsRect.contains(NSEvent.mouseLocation)
+    }
+
+    /// The pointer left the area: stop scrolling (the scroll would go to another window)
+    /// and resume by itself as soon as it comes back.
+    private func pauseAutoForMouse() {
+        guard autoScrolling else { return }
+        autoScrolling = false
+        autoPausedByMouse = true
+        hudView?.setAuto(false)
+        hudView?.setStatus("Auto-scroll en pause : remets la souris dans la zone pour reprendre", warning: false)
+        processPendingFrames()
+        mouseWatchTimer?.invalidate()
+        mouseWatchTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] timer in
+            guard let self = self, self.isCapturing, self.autoPausedByMouse else {
+                timer.invalidate()
+                return
+            }
+            if self.mouseInArea { self.resumeAutoAfterMouse() }
+        }
+    }
+
+    private func resumeAutoAfterMouse() {
+        stopMouseWatch()
+        guard isCapturing, !autoScrolling, !isProcessing else {
+            // Stitching still running: try again on the next tick
+            if isCapturing, !autoScrolling { pauseWatchRetry() }
+            return
+        }
+        autoScrolling = true
+        autoUnchangedCount = 0
+        autoRecoveries = 0
+        hudView?.setAuto(true)
+        hudView?.setStatus("Auto-scroll en cours…", warning: false)
+        autoStep()
+    }
+
+    private func pauseWatchRetry() {
+        autoPausedByMouse = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self, self.autoPausedByMouse else { return }
+            self.resumeAutoAfterMouse()
+        }
+    }
+
+    private func stopMouseWatch() {
+        autoPausedByMouse = false
+        mouseWatchTimer?.invalidate()
+        mouseWatchTimer = nil
+    }
+
     private func autoStep() {
         guard isCapturing, autoScrolling else { return }
+        guard mouseInArea else {
+            pauseAutoForMouse()
+            return
+        }
 
         let amount = Int(autoStepPoints.rounded())
         postScroll(points: amount)
@@ -296,6 +360,10 @@ class ScrollCapture {
             return
         }
         autoStepPoints = max(autoMinStep, autoStepPoints / 2)
+        guard mouseInArea else {
+            pauseAutoForMouse()
+            return
+        }
         postScroll(points: -max(Int(autoMinStep), lastAmount / 2))
 
         waitForSettle(since: Date()) { [weak self] in
@@ -342,8 +410,8 @@ class ScrollCapture {
         process(frames, expectedDelta: expectedDelta, done: done)
     }
 
+    /// Posted where the pointer is (no location set: setting one moved the pointer back to the center).
     private func postScroll(points: Int) {
-        let location = CGPoint(x: captureRect.midX, y: captureRect.midY)
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .pixel,
@@ -352,7 +420,6 @@ class ScrollCapture {
             wheel2: 0,
             wheel3: 0
         ) else { return }
-        event.location = location
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.post(tap: .cghidEventTap)
     }
@@ -412,6 +479,7 @@ class ScrollCapture {
     }
 
     private func teardownUI() {
+        stopMouseWatch()
         warningResetWork?.cancel()
         warningResetWork = nil
         hudPanel?.orderOut(nil)

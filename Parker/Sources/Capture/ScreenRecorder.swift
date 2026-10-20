@@ -59,11 +59,17 @@ class ScreenRecorder: NSObject {
                 guard let display = displayForMouseLocation(content.displays) else {
                     throw CaptureError.noDisplay
                 }
-                if await prepareCamera(display: display, cropRect: nil) {
+                let cameraShown = await prepareCamera(display: display, cropRect: nil)
+                if cameraShown {
                     content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 }
                 let filter = makeFilter(display: display, content: content)
-                try await startRecording(filter: filter, display: display)
+                if cameraShown {
+                    // With the camera: wait for the user to place it and press Start
+                    await MainActor.run { self.showReadyBar(filter: filter, display: display, cropRect: nil) }
+                } else {
+                    try await startRecording(filter: filter, display: display)
+                }
             } catch {
                 NSLog("Recording failed: \(error)")
                 await handleStartFailure()
@@ -84,11 +90,16 @@ class ScreenRecorder: NSObject {
                                 ?? self.displayForMouseLocation(content.displays) else {
                             throw CaptureError.noDisplay
                         }
-                        if await self.prepareCamera(display: display, cropRect: rect) {
+                        let cameraShown = await self.prepareCamera(display: display, cropRect: rect)
+                        if cameraShown {
                             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                         }
                         let filter = self.makeFilter(display: display, content: content)
-                        try await self.startRecording(filter: filter, display: display, cropRect: rect)
+                        if cameraShown {
+                            await MainActor.run { self.showReadyBar(filter: filter, display: display, cropRect: rect) }
+                        } else {
+                            try await self.startRecording(filter: filter, display: display, cropRect: rect)
+                        }
                     } catch {
                         NSLog("Area recording failed: \(error)")
                         await self.handleStartFailure()
@@ -112,6 +123,128 @@ class ScreenRecorder: NSObject {
         let bubble = bubbleWindowID
         let kept = bubble == nil ? [] : content.windows.filter { $0.windowID == bubble }
         return SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: kept)
+    }
+
+    // MARK: - Ready bar (camera on: the user places the bubble, then presses Start)
+
+    private var readyWindow: NSPanel?
+    private var readyLocalMonitor: Any?
+    private var readyGlobalMonitor: Any?
+    private var pendingStart: (() -> Void)?
+
+    private func showReadyBar(filter: SCContentFilter, display: SCDisplay, cropRect: CGRect?) {
+        if let crop = cropRect, borderWindow == nil {
+            showAreaBorder(cgRect: crop)
+        }
+        pendingStart = { [weak self] in
+            Task {
+                guard let self = self else { return }
+                do {
+                    try await self.startRecording(filter: filter, display: display, cropRect: cropRect)
+                } catch {
+                    NSLog("Recording failed: \(error)")
+                    await self.handleStartFailure()
+                }
+            }
+        }
+
+        let center = NSPoint(x: recordingArea.midX, y: recordingArea.midY)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main else { return }
+        let width: CGFloat = 440
+        let height: CGFloat = 56
+        let panel = NSPanel(
+            contentRect: NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height - 12, width: width, height: height),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = .floating
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        effect.blendingMode = .behindWindow
+        effect.material = .hudWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 14
+        effect.layer?.masksToBounds = true
+
+        let label = NSTextField(labelWithString: "Place ta caméra, puis lance l’enregistrement")
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .white.withAlphaComponent(0.8)
+        label.frame = NSRect(x: 16, y: 19, width: 220, height: 18)
+        label.lineBreakMode = .byTruncatingTail
+        effect.addSubview(label)
+
+        let cancel = NSButton(title: "Annuler", target: self, action: #selector(readyCancelClicked))
+        cancel.bezelStyle = .accessoryBarAction
+        cancel.isBordered = false
+        cancel.contentTintColor = .white.withAlphaComponent(0.6)
+        cancel.font = .systemFont(ofSize: 12, weight: .medium)
+        cancel.frame = NSRect(x: 246, y: 14, width: 70, height: 28)
+        cancel.toolTip = "Annuler (Échap)"
+        effect.addSubview(cancel)
+
+        let start = NSButton(title: "Démarrer", target: self, action: #selector(readyStartClicked))
+        start.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: nil)
+        start.imagePosition = .imageLeading
+        start.bezelStyle = .accessoryBarAction
+        start.isBordered = false
+        start.wantsLayer = true
+        start.layer?.backgroundColor = NSColor.systemRed.cgColor
+        start.layer?.cornerRadius = 8
+        start.contentTintColor = .white
+        start.attributedTitle = NSAttributedString(string: " Démarrer", attributes: [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+        ])
+        start.frame = NSRect(x: 322, y: 12, width: 104, height: 32)
+        start.toolTip = "Lancer l’enregistrement (Entrée)"
+        effect.addSubview(start)
+
+        panel.contentView = effect
+        panel.orderFrontRegardless()
+        readyWindow = panel
+
+        readyLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.readyWindow != nil else { return event }
+            switch event.keyCode {
+            case 36, 76: self.readyStartClicked(); return nil   // Return / Enter
+            case 53: self.readyCancelClicked(); return nil      // Escape
+            default: return event
+            }
+        }
+        readyGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            DispatchQueue.main.async { self?.readyCancelClicked() }
+        }
+    }
+
+    @objc private func readyStartClicked() {
+        let start = pendingStart
+        dismissReadyBar()
+        start?()
+    }
+
+    @objc private func readyCancelClicked() {
+        guard readyWindow != nil else { return }
+        dismissReadyBar()
+        borderWindow?.orderOut(nil)
+        borderWindow = nil
+        hideCamera()
+    }
+
+    private func dismissReadyBar() {
+        pendingStart = nil
+        readyWindow?.orderOut(nil)
+        readyWindow = nil
+        if let monitor = readyLocalMonitor { NSEvent.removeMonitor(monitor); readyLocalMonitor = nil }
+        if let monitor = readyGlobalMonitor { NSEvent.removeMonitor(monitor); readyGlobalMonitor = nil }
     }
 
     // MARK: - Webcam bubble
@@ -354,7 +487,7 @@ class ScreenRecorder: NSObject {
         let areaRect = cropRect
         await MainActor.run {
             showRecordingToolbar()
-            if let rect = areaRect {
+            if let rect = areaRect, borderWindow == nil {
                 showAreaBorder(cgRect: rect)
             }
         }

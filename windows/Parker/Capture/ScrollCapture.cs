@@ -162,9 +162,46 @@ namespace Parker
             hud.SetStatus(text, warning);
         }
 
+        System.Windows.Forms.Timer mouseWatch;   // auto-scroll paused until the mouse is back in the area
+
+        bool MouseInArea { get { return area.Contains(Cursor.Position); } }
+
+        /// <summary>The pointer left the area: stop scrolling (the wheel would go to another window)
+        /// and resume by itself as soon as it comes back. The pointer is never moved.</summary>
+        void PauseAutoForMouse()
+        {
+            if (!auto) return;
+            auto = false;
+            hud.SetAuto(false);
+            SetStatus("Auto-scroll en pause : remets la souris dans la zone pour reprendre", false);
+            StopMouseWatch();
+            mouseWatch = new System.Windows.Forms.Timer { Interval = 200 };
+            mouseWatch.Tick += (s, e) =>
+            {
+                if (!active) { StopMouseWatch(); return; }
+                if (!MouseInArea) return;
+                StopMouseWatch();
+                auto = true;
+                autoUnchanged = 0; autoRecoveries = 0;
+                hud.SetAuto(true);
+                SetStatus("Auto-scroll en cours…", false);
+                AutoStep();
+            };
+            mouseWatch.Start();
+        }
+
+        void StopMouseWatch()
+        {
+            if (mouseWatch == null) return;
+            mouseWatch.Stop();
+            mouseWatch.Dispose();
+            mouseWatch = null;
+        }
+
         void ToggleAuto()
         {
             if (!active) return;
+            StopMouseWatch(); // the button takes over from the automatic pause
             if (auto)
             {
                 auto = false;
@@ -179,8 +216,9 @@ namespace Parker
             autoStep = autoBaseStep;
             hud.SetAuto(true);
             SetStatus("Auto-scroll en cours…", false);
-            // Cursor over the content so the wheel events reach the right window
-            Native.SetCursorPos(area.X + area.Width / 2, area.Y + area.Height / 2);
+            // Wheel events go to the window under the pointer: when Auto is pressed from the HUD,
+            // the pointer is moved into the area once. It is never moved again afterwards.
+            if (!MouseInArea) Native.SetCursorPos(area.X + area.Width / 2, area.Y + area.Height / 2);
             AutoStep();
         }
 
@@ -191,8 +229,8 @@ namespace Parker
         void AutoStep()
         {
             if (!active || !auto) return;
+            if (!MouseInArea) { PauseAutoForMouse(); return; }
             var amount = autoStep;
-            Native.SetCursorPos(area.X + area.Width / 2, area.Y + area.Height / 2);
             Native.ScrollWheel(-amount);
             RunAutoBatch(result =>
             {
@@ -229,7 +267,7 @@ namespace Parker
                 return;
             }
             autoStep = Math.Max(MinStep, autoStep / 2);
-            Native.SetCursorPos(area.X + area.Width / 2, area.Y + area.Height / 2);
+            if (!MouseInArea) { PauseAutoForMouse(); return; }
             Native.ScrollWheel(Math.Max(MinStep, lastAmount / 2));
             RunAutoBatch(_ => AutoStep());
         }
@@ -370,6 +408,7 @@ namespace Parker
 
         void Teardown()
         {
+            StopMouseWatch();
             if (keyTimer != null) { keyTimer.Stop(); keyTimer.Dispose(); keyTimer = null; }
             if (hud != null) { hud.Close(); hud = null; }
             if (border != null) { border.Close(); border = null; }
