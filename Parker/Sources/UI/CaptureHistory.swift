@@ -3,16 +3,14 @@ import SwiftUI
 import AVFoundation
 import ImageIO
 
-/// History panel: the last 20 captures (Defaults.recentCaptures) in a grid, opened with the
-/// "history" shortcut (Shift + profile modifier + H).
+/// "Captures récentes" panel: the last 20 captures, opened with Shift + profile modifier + H.
+/// Layout from the Figma design "Panneau ancré": header, the selected capture large with its
+/// details and actions, then a film strip of the 20 captures (selected one centered and larger).
 ///
-/// - click or Return: copy to the clipboard and close (the app you were in stays active,
-///   so Cmd+V works right away);
-/// - 1 to 9: copy that capture directly;
-/// - arrows: move the selection;
-/// - drag a capture into any app;
-/// - right click: open, annotate, show in Finder, remove from history;
-/// - Esc, the shortcut again, or a click elsewhere: close.
+/// - ← → or the chevrons: browse; click a thumbnail: select it; double-click: copy and close;
+/// - Return or Cmd+C: copy the selected capture and close (the app you were in stays in front);
+/// - drag the preview or a thumbnail into any app; right click: more actions;
+/// - Esc, the shortcut again or a click elsewhere: close.
 final class CaptureHistoryController: NSObject, NSWindowDelegate {
     private var panel: CaptureHistoryPanel?
     private let model = CaptureHistoryModel()
@@ -46,6 +44,11 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
             self?.dismiss()
             FloatingThumbnailController.saveAs(url: url)
         }
+        model.onShowAll = { [weak self] in
+            self?.dismiss()
+            NSWorkspace.shared.open(Defaults.shared.captureDirectory)
+        }
+        model.onClose = { [weak self] in self?.dismiss() }
         model.onRemove = { [weak self] url in
             Defaults.shared.removeRecentCapture(url)
             self?.model.reload()
@@ -69,13 +72,14 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
 
         model.reload()
 
-        let hosting = NSHostingView(rootView: CaptureHistoryView(model: model))
+        let width = min(HistoryStyle.panelWidth, screen.visibleFrame.width - 48)
+        let hosting = NSHostingView(rootView: CaptureHistoryView(model: model, width: width))
         let size = hosting.fittingSize
         hosting.frame = NSRect(origin: .zero, size: size)
 
         let frame = NSRect(
             x: screen.visibleFrame.midX - size.width / 2,
-            y: screen.visibleFrame.midY - size.height / 2 + 40,
+            y: screen.visibleFrame.midY - size.height / 2 + 30,
             width: size.width,
             height: size.height
         )
@@ -89,6 +93,7 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -99,7 +104,7 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
         panel.alphaValue = 0
         panel.makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.14
+            ctx.duration = 0.16
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 1
         }
@@ -136,7 +141,6 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
 
     /// Returns true when the key was handled.
     private func handleKey(_ event: NSEvent) -> Bool {
-        let columns = CaptureHistoryLayout.columns
         switch event.keyCode {
         case 53: // Esc
             dismiss()
@@ -144,28 +148,17 @@ final class CaptureHistoryController: NSObject, NSWindowDelegate {
         case 36, 76: // Return, Enter
             model.copySelected()
             return true
-        case 123: // left
+        case 123, 126: // left, up: more recent
             model.moveSelection(by: -1)
             return true
-        case 124: // right
+        case 124, 125: // right, down: older
             model.moveSelection(by: 1)
-            return true
-        case 125: // down
-            model.moveSelection(by: columns)
-            return true
-        case 126: // up
-            model.moveSelection(by: -columns)
             return true
         default:
             break
         }
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "c" {
             model.copySelected()
-            return true
-        }
-        if event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-           let chars = event.charactersIgnoringModifiers, let digit = Int(chars), (1...9).contains(digit) {
-            model.copy(at: digit - 1)
             return true
         }
         return false
@@ -186,18 +179,25 @@ private final class CaptureHistoryPanel: NSPanel {
     }
 }
 
-// MARK: - Model
+// MARK: - Style (Figma "Panneau ancré")
 
-enum CaptureHistoryLayout {
-    static let columns = 5
-    static let tileWidth: CGFloat = 148
-    static let tileHeight: CGFloat = 96
-    static let spacing: CGFloat = 12
-    static let padding: CGFloat = 20
-    static var panelWidth: CGFloat {
-        CGFloat(columns) * tileWidth + CGFloat(columns - 1) * spacing + 2 * padding
-    }
+enum HistoryStyle {
+    static let panelWidth: CGFloat = 1160
+    static let horizontalPadding: CGFloat = 28
+
+    static let panelFill = Color(red: 35 / 255, green: 37 / 255, blue: 42 / 255).opacity(0.96)
+    static let panelStroke = Color.white.opacity(0.14)
+    static let textPrimary = Color(red: 0xF5 / 255, green: 0xF5 / 255, blue: 0xF7 / 255)
+    static let textSecondary = Color(red: 0xA5 / 255, green: 0xA8 / 255, blue: 0xB0 / 255)
+    static let textTertiary = Color(red: 0x70 / 255, green: 0x74 / 255, blue: 0x7D / 255)
+    static let accent = Color(red: 0x40 / 255, green: 0x9C / 255, blue: 1)
+    static let control = Color.white.opacity(0.05)
+    static let hairline = Color.white.opacity(0.08)
+
+    static let previewSize = CGSize(width: 434, height: 244)
 }
+
+// MARK: - Model
 
 enum CaptureHistoryKind {
     case image, gif, video
@@ -210,16 +210,20 @@ enum CaptureHistoryKind {
         }
     }
 
-    var badge: String? {
+    var label: String {
         switch self {
-        case .image: return nil
-        case .gif: return "GIF"
-        case .video: return "Vidéo"
+        case .image: return "Capture d’écran"
+        case .gif: return "GIF animé"
+        case .video: return "Enregistrement vidéo"
         }
     }
 
-    var placeholderSymbol: String {
-        self == .image ? "photo" : "film"
+    var symbol: String {
+        switch self {
+        case .image: return "photo"
+        case .gif: return "photo.stack"
+        case .video: return "video"
+        }
     }
 }
 
@@ -227,9 +231,20 @@ struct CaptureHistoryItem: Identifiable {
     let url: URL
     let kind: CaptureHistoryKind
     let date: Date?
+    let source: CaptureSource.Info?
+    let fileSize: Int64?
+    var pixelSize: CGSize?
     var thumbnail: NSImage?
+    var preview: NSImage?
 
     var id: URL { url }
+
+    var title: String {
+        if let title = source?.windowTitle, !title.isEmpty { return title }
+        return kind.label
+    }
+
+    var format: String { url.pathExtension.uppercased() }
 }
 
 final class CaptureHistoryModel: ObservableObject {
@@ -242,11 +257,14 @@ final class CaptureHistoryModel: ObservableObject {
     var onReveal: ((URL) -> Void)?
     var onSaveAs: ((URL) -> Void)?
     var onRemove: ((URL) -> Void)?
+    var onShowAll: (() -> Void)?
+    var onClose: (() -> Void)?
 
     private static let thumbnailCache = NSCache<NSURL, NSImage>()
+    private static let previewCache = NSCache<NSURL, NSImage>()
 
-    var shortcutSymbol: String {
-        ShortcutCatalog.definition(for: .history).symbol
+    var current: CaptureHistoryItem? {
+        items.indices.contains(selected) ? items[selected] : nil
     }
 
     func reload() {
@@ -255,47 +273,69 @@ final class CaptureHistoryModel: ObservableObject {
             .filter { fm.fileExists(atPath: $0.path) }
             .prefix(20)
             .map { url in
-                let values = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+                let values = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey, .fileSizeKey])
                 return CaptureHistoryItem(
                     url: url,
                     kind: CaptureHistoryKind(url: url),
                     date: values?.creationDate ?? values?.contentModificationDate,
-                    thumbnail: Self.thumbnailCache.object(forKey: url as NSURL)
+                    source: Defaults.shared.captureInfo(for: url),
+                    fileSize: values?.fileSize.map { Int64($0) },
+                    pixelSize: nil,
+                    thumbnail: Self.thumbnailCache.object(forKey: url as NSURL),
+                    preview: Self.previewCache.object(forKey: url as NSURL)
                 )
             }
-        selected = min(selected, max(items.count - 1, 0))
-        if items.indices.contains(selected) == false { selected = 0 }
+        if !items.indices.contains(selected) { selected = 0 }
 
-        for item in items where item.thumbnail == nil {
+        for item in items {
             let url = item.url
             let kind = item.kind
             Task.detached(priority: .userInitiated) { [weak self] in
-                guard let image = await Self.makeThumbnail(url: url, kind: kind) else { return }
+                let size = await Self.pixelSize(url: url, kind: kind)
+                let thumb = item.thumbnail == nil ? await Self.makeImage(url: url, kind: kind, maxPixels: 360) : nil
                 await MainActor.run {
-                    Self.thumbnailCache.setObject(image, forKey: url as NSURL)
+                    if let thumb { Self.thumbnailCache.setObject(thumb, forKey: url as NSURL) }
                     guard let self, let index = self.items.firstIndex(where: { $0.url == url }) else { return }
-                    self.items[index].thumbnail = image
+                    if let thumb { self.items[index].thumbnail = thumb }
+                    self.items[index].pixelSize = size
                 }
             }
         }
+        loadPreviewForSelection()
+    }
+
+    func select(_ index: Int) {
+        guard items.indices.contains(index), index != selected else { return }
+        selected = index
+        loadPreviewForSelection()
     }
 
     func moveSelection(by delta: Int) {
         guard !items.isEmpty else { return }
-        selected = min(max(selected + delta, 0), items.count - 1)
+        select(min(max(selected + delta, 0), items.count - 1))
     }
 
     func copySelected() {
-        copy(at: selected)
+        guard let item = current else { return }
+        onCopy?(item.url)
     }
 
-    func copy(at index: Int) {
-        guard items.indices.contains(index) else { return }
-        onCopy?(items[index].url)
+    /// Large image of the selected capture (loaded once, cached).
+    private func loadPreviewForSelection() {
+        guard let item = current, item.preview == nil else { return }
+        let url = item.url
+        let kind = item.kind
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let image = await Self.makeImage(url: url, kind: kind, maxPixels: 1100) else { return }
+            await MainActor.run {
+                Self.previewCache.setObject(image, forKey: url as NSURL)
+                guard let self, let index = self.items.firstIndex(where: { $0.url == url }) else { return }
+                self.items[index].preview = image
+            }
+        }
     }
 
-    private static func makeThumbnail(url: URL, kind: CaptureHistoryKind) async -> NSImage? {
-        let maxPixels: CGFloat = 480
+    private static func makeImage(url: URL, kind: CaptureHistoryKind, maxPixels: CGFloat) async -> NSImage? {
         if kind == .video {
             let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
             generator.appliesPreferredTrackTransform = true
@@ -312,89 +352,294 @@ final class CaptureHistoryModel: ObservableObject {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         return NSImage(cgImage: image, size: .zero)
     }
+
+    private static func pixelSize(url: URL, kind: CaptureHistoryKind) async -> CGSize? {
+        if kind == .video {
+            guard let track = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first,
+                  let size = try? await track.load(.naturalSize) else { return nil }
+            return size
+        }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int,
+              let h = props[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        return CGSize(width: w, height: h)
+    }
 }
 
-// MARK: - Views
+// MARK: - Panel view
 
 struct CaptureHistoryView: View {
     @ObservedObject var model: CaptureHistoryModel
+    let width: CGFloat
 
-    private let columns = Array(
-        repeating: GridItem(.fixed(CaptureHistoryLayout.tileWidth), spacing: CaptureHistoryLayout.spacing),
-        count: CaptureHistoryLayout.columns
-    )
+    private var contentWidth: CGFloat { width - 2 * HistoryStyle.horizontalPadding }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("Historique")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(SettingsColor.ink)
-                Text(model.items.isEmpty ? "" : "\(model.items.count) capture\(model.items.count > 1 ? "s" : "")")
-                    .font(.system(size: 12))
-                    .foregroundColor(SettingsColor.muted)
-                Spacer()
-                Text(model.shortcutSymbol)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(SettingsColor.muted)
-            }
+            Capsule()
+                .fill(Color.white.opacity(0.22))
+                .frame(width: 36, height: 4)
+                .frame(maxWidth: .infinity)
 
-            if model.items.isEmpty {
-                emptyState
-            } else {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: CaptureHistoryLayout.spacing) {
-                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                        CaptureHistoryTile(item: item, index: index, isSelected: index == model.selected)
-                            .onHover { inside in
-                                if inside { model.selected = index }
-                            }
-                            .onTapGesture { model.copy(at: index) }
-                            .onDrag { NSItemProvider(object: item.url as NSURL) }
-                            .contextMenu { contextMenu(for: item) }
+            header
+
+            if let item = model.current {
+                SelectedCaptureView(item: item, model: model, availableWidth: contentWidth)
+                VStack(spacing: 10) {
+                    FilmStrip(model: model, width: contentWidth)
+                    Capsule()
+                        .fill(HistoryStyle.accent)
+                        .frame(width: 68, height: 2)
+                    HStack {
+                        Text("Plus récentes")
+                        Spacer()
+                        Text("Plus anciennes")
                     }
+                    .font(.system(size: 10))
+                    .foregroundColor(HistoryStyle.textSecondary)
                 }
+            } else {
+                emptyState
             }
 
-            HStack(spacing: 18) {
-                hint(key: "Clic", text: "copier")
-                hint(key: "1 à 9", text: "copier directement")
-                hint(key: "Glisser", text: "déposer dans une app")
-                hint(key: "Clic droit", text: "plus d’options")
-                Spacer(minLength: 0)
-                hint(key: "Esc", text: "fermer")
-            }
+            footer
         }
-        .padding(CaptureHistoryLayout.padding)
-        .frame(width: CaptureHistoryLayout.panelWidth, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 17 / 255, green: 24 / 255, blue: 39 / 255).opacity(0.96))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(SettingsColor.groupStroke, lineWidth: 1)
-        )
+        .padding(.top, 10)
+        .padding(.bottom, 16)
+        .padding(.horizontal, HistoryStyle.horizontalPadding)
+        .frame(width: width)
+        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(HistoryStyle.panelFill))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(HistoryStyle.panelStroke, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .environment(\.colorScheme, .dark)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "photo")
+                .font(.system(size: 17, weight: .regular))
+                .foregroundColor(HistoryStyle.textPrimary)
+                .frame(width: 36, height: 36)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(HistoryStyle.control))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Captures récentes")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundColor(HistoryStyle.textPrimary)
+                Text("Vos 20 dernières captures, à portée de main.")
+                    .font(.system(size: 11))
+                    .foregroundColor(HistoryStyle.textSecondary)
+            }
+
+            Spacer(minLength: 12)
+
+            if !model.items.isEmpty {
+                Text("\(model.selected + 1) sur \(model.items.count)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(HistoryStyle.textSecondary)
+                    .monospacedDigit()
+                HStack(spacing: 6) {
+                    SquareIconButton(symbol: "chevron.left", help: "Capture plus récente") { model.moveSelection(by: -1) }
+                        .disabled(model.selected == 0)
+                    SquareIconButton(symbol: "chevron.right", help: "Capture plus ancienne") { model.moveSelection(by: 1) }
+                        .disabled(model.selected >= model.items.count - 1)
+                }
+                Rectangle()
+                    .fill(HistoryStyle.hairline)
+                    .frame(width: 1, height: 18)
+            }
+            SquareIconButton(symbol: "xmark", help: "Fermer (Échap)", fill: Color.white.opacity(0.03)) { model.onClose?() }
+        }
+        .frame(height: 40)
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 26, weight: .light))
-                .foregroundColor(SettingsColor.muted)
+                .font(.system(size: 28, weight: .light))
+                .foregroundColor(HistoryStyle.textSecondary)
             Text("Aucune capture pour l’instant")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(SettingsColor.ink)
-            Text("Tes 20 dernières captures apparaîtront ici.")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(HistoryStyle.textPrimary)
+            Text("Vos 20 dernières captures apparaîtront ici.")
                 .font(.system(size: 12))
-                .foregroundColor(SettingsColor.muted)
+                .foregroundColor(HistoryStyle.textSecondary)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 150)
+        .frame(height: 260)
     }
 
-    @ViewBuilder
-    private func contextMenu(for item: CaptureHistoryItem) -> some View {
+    private var footer: some View {
+        HStack {
+            HStack(spacing: 7) {
+                KeyCap(text: "← →", size: 10)
+                Text("Parcourir")
+                KeyCap(text: "esc", size: 9)
+                Text("Fermer")
+            }
+            .font(.system(size: 10))
+            .foregroundColor(HistoryStyle.textSecondary)
+
+            Spacer()
+
+            Button { model.onShowAll?() } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 11))
+                    Text("Toutes les captures")
+                        .font(.system(size: 11, weight: .medium))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundColor(HistoryStyle.accent)
+            }
+            .buttonStyle(.plain)
+            .help("Ouvrir le dossier des captures")
+        }
+        .frame(height: 22)
+    }
+}
+
+// MARK: - Selected capture
+
+private struct SelectedCaptureView: View {
+    let item: CaptureHistoryItem
+    @ObservedObject var model: CaptureHistoryModel
+    let availableWidth: CGFloat
+
+    private let shareAnchor = ShareAnchor()
+
+    private var previewSize: CGSize {
+        // The preview keeps the design size, and shrinks on narrow screens
+        let width = min(HistoryStyle.previewSize.width, availableWidth * 0.42)
+        return CGSize(width: width, height: width * HistoryStyle.previewSize.height / HistoryStyle.previewSize.width)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 28) {
+            preview
+            details
+                .frame(height: previewSize.height)
+        }
+        .frame(height: previewSize.height)
+    }
+
+    private var preview: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.03))
+            if let image = item.preview ?? item.thumbnail {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: item.kind.symbol)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundColor(HistoryStyle.textSecondary)
+            }
+            if item.kind == .video {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(.white)
+                    .frame(width: 46, height: 46)
+                    .background(Circle().fill(Color.black.opacity(0.55)))
+            }
+        }
+        .frame(width: previewSize.width, height: previewSize.height)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: Color.black.opacity(0.31), radius: 12, x: 0, y: 8)
+        .onDrag { NSItemProvider(object: item.url as NSURL) }
+        .onTapGesture(count: 2) { model.onOpen?(item.url) }
+        .contextMenu { CaptureContextMenu(item: item, model: model) }
+        .help("Glisser vers une app, double-clic pour ouvrir")
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    HStack(spacing: 7) {
+                        if let icon = item.source?.appIcon {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: item.kind.symbol)
+                                .font(.system(size: 11))
+                                .foregroundColor(HistoryStyle.accent)
+                        }
+                        Text(item.source?.appName ?? item.kind.label)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(HistoryStyle.textSecondary)
+                    }
+                    Spacer()
+                    Text(HistoryFormat.date(item.date))
+                        .font(.system(size: 11))
+                        .foregroundColor(HistoryStyle.textSecondary)
+                }
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(item.title)
+                        .font(.system(size: 27, weight: .semibold))
+                        .foregroundColor(HistoryStyle.textPrimary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(item.url.deletingPathExtension().lastPathComponent)
+                        .font(.system(size: 12))
+                        .foregroundColor(HistoryStyle.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                HStack(spacing: 8) {
+                    ForEach(Array(metadata.enumerated()), id: \.offset) { index, value in
+                        if index > 0 { Text("·") }
+                        Text(value)
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundColor(HistoryStyle.textTertiary)
+            }
+            .padding(.top, 8)
+
+            Spacer(minLength: 12)
+
+            HStack(spacing: 8) {
+                ActionButton(title: "Ouvrir", symbol: "arrow.up.left.and.arrow.down.right", primary: true) {
+                    model.onOpen?(item.url)
+                }
+                ActionButton(title: "Copier", symbol: "doc.on.doc") {
+                    model.onCopy?(item.url)
+                }
+                ActionButton(title: "Partager", symbol: "square.and.arrow.up") {
+                    shareAnchor.share(item.url)
+                }
+                .background(ShareAnchorView(anchor: shareAnchor))
+            }
+            .padding(.bottom, 5)
+        }
+    }
+
+    private var metadata: [String] {
+        var values = [item.format]
+        if let size = item.pixelSize {
+            values.append("\(HistoryFormat.number(Int(size.width))) × \(HistoryFormat.number(Int(size.height)))")
+        }
+        if let bytes = item.fileSize {
+            values.append(HistoryFormat.bytes(bytes))
+        }
+        return values
+    }
+}
+
+private struct CaptureContextMenu: View {
+    let item: CaptureHistoryItem
+    let model: CaptureHistoryModel
+
+    var body: some View {
         Button("Copier") { model.onCopy?(item.url) }
         Button("Ouvrir") { model.onOpen?(item.url) }
         if item.kind == .image {
@@ -405,99 +650,254 @@ struct CaptureHistoryView: View {
         Divider()
         Button("Retirer de l’historique") { model.onRemove?(item.url) }
     }
+}
 
-    private func hint(key: String, text: String) -> some View {
-        HStack(spacing: 5) {
-            Text(key)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(SettingsColor.ink.opacity(0.75))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(RoundedRectangle(cornerRadius: 4).fill(SettingsColor.control))
-            Text(text)
-                .font(.system(size: 11))
-                .foregroundColor(SettingsColor.muted)
+// MARK: - Film strip
+
+private struct FilmStrip: View {
+    @ObservedObject var model: CaptureHistoryModel
+    let width: CGFloat
+
+    private let spacing: CGFloat = 11
+    private let height: CGFloat = 139
+
+    var body: some View {
+        // Side room so the first and the last thumbnails can sit in the center
+        let sidePadding = max(0, width / 2 - FilmTile.size(distance: 0).width / 2)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .bottom, spacing: spacing) {
+                    Color.clear.frame(width: max(0, sidePadding - spacing), height: 1)
+                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                        FilmTile(item: item, distance: abs(index - model.selected))
+                            .id(item.id)
+                            .onTapGesture(count: 2) { model.onCopy?(item.url) }
+                            .simultaneousGesture(TapGesture().onEnded { model.select(index) })
+                            .onDrag { NSItemProvider(object: item.url as NSURL) }
+                            .contextMenu { CaptureContextMenu(item: item, model: model) }
+                            .help("Clic : afficher. Double-clic : copier.")
+                    }
+                    Color.clear.frame(width: max(0, sidePadding - spacing), height: 1)
+                }
+                .frame(height: height, alignment: .bottom)
+                .animation(.easeOut(duration: 0.2), value: model.selected)
+            }
+            .frame(width: width, height: height)
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: 0.16),
+                        .init(color: .black, location: 0.84),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .onAppear {
+                if let id = model.current?.id { proxy.scrollTo(id, anchor: .center) }
+            }
+            .onChange(of: model.selected) { _, _ in
+                guard let id = model.current?.id else { return }
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
+            }
         }
     }
 }
 
-private struct CaptureHistoryTile: View {
+private struct FilmTile: View {
     let item: CaptureHistoryItem
-    let index: Int
-    let isSelected: Bool
+    let distance: Int
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "fr_FR")
-        formatter.unitsStyle = .short
-        return formatter
-    }()
+    /// Selected, its neighbours, then the others (sizes from the design).
+    static func size(distance: Int) -> CGSize {
+        switch distance {
+        case 0: return CGSize(width: 167, height: 138)
+        case 1: return CGSize(width: 116, height: 97)
+        default: return CGSize(width: 94, height: 78)
+        }
+    }
+
+    private var isSelected: Bool { distance == 0 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .topLeading) {
-                preview
-                    .frame(width: CaptureHistoryLayout.tileWidth, height: CaptureHistoryLayout.tileHeight)
-                    .clipped()
+        let size = Self.size(distance: distance)
+        let scale = size.width / 94
+        let outerRadius = 12 * scale
+        let padding = 6 * scale
 
-                if index < 9 {
-                    Text("\(index + 1)")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(width: 18, height: 18)
-                        .background(Circle().fill(Color.black.opacity(0.55)))
-                        .padding(6)
-                }
-
-                if let badge = item.kind.badge {
-                    Text(badge)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.black.opacity(0.6)))
-                        .padding(6)
-                        .frame(width: CaptureHistoryLayout.tileWidth, height: CaptureHistoryLayout.tileHeight, alignment: .bottomTrailing)
-                }
+        ZStack {
+            if let image = item.thumbnail {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: item.kind.symbol)
+                    .font(.system(size: 14 * scale, weight: .light))
+                    .foregroundColor(HistoryStyle.textSecondary)
             }
-            .frame(width: CaptureHistoryLayout.tileWidth, height: CaptureHistoryLayout.tileHeight)
-            .background(SettingsColor.control)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isSelected ? SettingsColor.accent : SettingsColor.groupStroke, lineWidth: isSelected ? 2 : 1)
-            )
-
-            Text(caption)
-                .font(.system(size: 10))
-                .foregroundColor(isSelected ? SettingsColor.ink : SettingsColor.muted)
-                .lineLimit(1)
-                .frame(width: CaptureHistoryLayout.tileWidth, alignment: .leading)
+            if item.kind != .image {
+                Image(systemName: item.kind == .video ? "play.fill" : "photo.stack")
+                    .font(.system(size: 7 * scale))
+                    .foregroundColor(.white)
+                    .padding(4 * scale)
+                    .background(Circle().fill(Color.black.opacity(0.55)))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(3 * scale)
+            }
         }
+        .frame(width: size.width - 2 * padding, height: size.height - 2 * padding)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: outerRadius / 2, style: .continuous))
+        .padding(padding)
+        .frame(width: size.width, height: size.height)
+        .background(
+            RoundedRectangle(cornerRadius: outerRadius, style: .continuous)
+                .fill(isSelected ? HistoryStyle.accent.opacity(0.13) : Color.white.opacity(0.02))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: outerRadius, style: .continuous)
+                .stroke(isSelected ? HistoryStyle.accent : HistoryStyle.hairline, lineWidth: isSelected ? 1 : 2)
+        )
         .contentShape(Rectangle())
-        .help(item.url.lastPathComponent)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Capture \(index + 1), \(caption)")
-        .accessibilityAddTraits(.isButton)
     }
+}
 
-    @ViewBuilder
-    private var preview: some View {
-        if let thumbnail = item.thumbnail {
-            Image(nsImage: thumbnail)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        } else {
-            Image(systemName: item.kind.placeholderSymbol)
-                .font(.system(size: 20, weight: .light))
-                .foregroundColor(SettingsColor.muted)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+// MARK: - Controls
+
+private struct SquareIconButton: View {
+    let symbol: String
+    let help: String
+    var fill: Color = HistoryStyle.control
+    let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(HistoryStyle.textPrimary.opacity(isEnabled ? 1 : 0.35))
+                .frame(width: 32, height: 32)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(fill))
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+}
+
+private struct ActionButton: View {
+    let title: String
+    let symbol: String
+    var primary = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .medium))
+                Text(title)
+                    .font(.system(size: 12, weight: primary ? .semibold : .medium))
+            }
+            .foregroundColor(primary ? .white : HistoryStyle.textPrimary)
+            .padding(.horizontal, primary ? 16 : 14)
+            .frame(height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(primary ? HistoryStyle.accent : HistoryStyle.control)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct KeyCap: View {
+    let text: String
+    let size: CGFloat
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: size))
+            .foregroundColor(HistoryStyle.textSecondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(HistoryStyle.hairline, lineWidth: 1))
+    }
+}
+
+/// Gives the share button an AppKit view to anchor the system share menu.
+private final class ShareAnchor {
+    weak var view: NSView?
+
+    func share(_ url: URL) {
+        guard let view else { return }
+        NSSharingServicePicker(items: [url]).show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+}
+
+private struct ShareAnchorView: NSViewRepresentable {
+    let anchor: ShareAnchor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        anchor.view = view
+        return view
     }
 
-    private var caption: String {
-        guard let date = item.date else { return item.url.lastPathComponent }
-        if Date().timeIntervalSince(date) < 60 { return "À l’instant" }
-        return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+    func updateNSView(_ nsView: NSView, context: Context) {
+        anchor.view = nsView
+    }
+}
+
+// MARK: - Formatting
+
+enum HistoryFormat {
+    private static let time: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "fr_FR")
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private static let day: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "fr_FR")
+        f.setLocalizedDateFormatFromTemplate("d MMM")
+        return f
+    }()
+
+    private static let numbers: NumberFormatter = {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "fr_FR")
+        f.numberStyle = .decimal
+        return f
+    }()
+
+    /// "Aujourd’hui à 14:28", "Hier à 09:12", "12 oct. à 18:40".
+    static func date(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let calendar = Calendar.current
+        let prefix: String
+        if calendar.isDateInToday(date) {
+            prefix = "Aujourd’hui"
+        } else if calendar.isDateInYesterday(date) {
+            prefix = "Hier"
+        } else {
+            prefix = day.string(from: date)
+        }
+        return "\(prefix) à \(time.string(from: date))"
+    }
+
+    static func number(_ value: Int) -> String {
+        numbers.string(from: NSNumber(value: value)) ?? String(value)
+    }
+
+    static func bytes(_ value: Int64) -> String {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f.string(fromByteCount: value)
     }
 }

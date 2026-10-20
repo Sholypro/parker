@@ -160,12 +160,31 @@ class Defaults {
         }
     }
 
+    /// Source of each capture in the history (app name, bundle id, window title), by file path.
+    func captureInfo(for url: URL) -> CaptureSource.Info? {
+        guard let all = store.dictionary(forKey: "captureInfo") as? [String: [String: String]],
+              let entry = all[url.path] else { return nil }
+        return CaptureSource.Info(entry)
+    }
+
+    private func recordCaptureInfo(for url: URL) {
+        var all = (store.dictionary(forKey: "captureInfo") as? [String: [String: String]]) ?? [:]
+        if all[url.path] == nil {
+            all[url.path] = CaptureSource.current().dictionary
+        }
+        // Keep entries of the history only
+        let kept = Set(recentCaptures.map { $0.path })
+        all = all.filter { kept.contains($0.key) }
+        store.set(all, forKey: "captureInfo")
+    }
+
     func addRecentCapture(_ url: URL) {
         let previous = recentCaptures
         var recent = previous
         recent.removeAll { $0 == url }
         recent.insert(url, at: 0)
         recentCaptures = recent
+        recordCaptureInfo(for: url)
         // The 21st capture leaves the history: its file goes too if Parker owns it
         deleteOwnedFiles(previous.filter { !recentCaptures.contains($0) })
     }

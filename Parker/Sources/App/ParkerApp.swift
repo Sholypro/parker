@@ -200,6 +200,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let app else { return }
         guard app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
         lastActiveExternalApp = app
+        CaptureSource.lastExternalApp = app
     }
 
     private func prepareForCapture(preferredApp: NSRunningApplication?, action: @escaping () -> Void) {
