@@ -364,8 +364,35 @@ private final class ThumbnailPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// Button drawn over the card. A click runs its action; moving the mouse while pressed
+/// drags the capture instead (the buttons cover most of a small card, it must stay grabbable).
 private final class OverlayButton: NSButton {
+    weak var dragSource: ThumbnailView?
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window, let dragSource else {
+            super.mouseDown(with: event)
+            return
+        }
+        let start = event.locationInWindow
+        highlight(true)
+        defer { highlight(false) }
+        while let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
+            if next.type == .leftMouseUp {
+                let point = convert(next.locationInWindow, from: nil)
+                if bounds.contains(point), let action { NSApp.sendAction(action, to: target, from: self) }
+                return
+            }
+            let p = next.locationInWindow
+            if hypot(p.x - start.x, p.y - start.y) > 4 {
+                highlight(false)
+                dragSource.startDrag(with: next)
+                return
+            }
+        }
+    }
 }
 
 /// Container that lets clicks fall through to the card except on its buttons.
@@ -487,6 +514,7 @@ class ThumbnailView: NSView, NSDraggingSource {
 
     private func makePill(title: String, action: Selector) -> NSButton {
         let button = OverlayButton(title: title, target: self, action: action)
+        button.dragSource = self
         button.isBordered = false
         button.wantsLayer = true
         button.layer?.cornerRadius = 14
@@ -500,6 +528,7 @@ class ThumbnailView: NSView, NSDraggingSource {
 
     private func addCorner(symbol: String, tip: String, action: Selector, frame: NSRect) {
         let button = OverlayButton(frame: frame)
+        button.dragSource = self
         button.isBordered = false
         button.wantsLayer = true
         button.layer?.cornerRadius = frame.width / 2
@@ -550,11 +579,26 @@ class ThumbnailView: NSView, NSDraggingSource {
         let point = convert(event.locationInWindow, from: nil)
         guard hypot(point.x - start.x, point.y - start.y) > 4 else { return }
         mouseDownPoint = nil
+        startDrag(with: event)
+    }
 
-        let item = NSDraggingItem(pasteboardWriter: fileURL as NSURL)
+    /// Drags the capture file out of the card: drop it in a conversation, a mail, Figma, the Finder…
+    /// The file itself is dragged (like from the Finder); PNG captures also carry the image data
+    /// for apps that only accept pasted images.
+    func startDrag(with event: NSEvent) {
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(fileURL.absoluteString, forType: .fileURL)
+        if fileURL.pathExtension.lowercased() == "png", let data = try? Data(contentsOf: fileURL) {
+            pasteboardItem.setData(data, forType: .png)
+        }
+        let item = NSDraggingItem(pasteboardWriter: pasteboardItem)
         let preview = NSImage(cgImage: image, size: bounds.size)
         item.setDraggingFrame(bounds, contents: preview)
-        beginDraggingSession(with: [item], event: event, source: self)
+
+        // The overlay would cover the drag image's source: hide it while dragging
+        overlay.alphaValue = 0
+        let session = beginDraggingSession(with: [item], event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = true
     }
 
     override func mouseUp(with event: NSEvent) {
