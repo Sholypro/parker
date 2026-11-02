@@ -5,14 +5,25 @@ import AVFoundation
 /// It is a real window, so it appears in the video exactly where it sits on screen: the recorder
 /// adds it back to its capture filter (Parker's other windows stay excluded).
 /// Drag it anywhere; double-click to switch between three sizes.
-final class CameraBubble {
+final class CameraBubble: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var panel: NSPanel?
+    private var frameOutput: AVCaptureVideoDataOutput?
+    private var frameHandler: ((CMSampleBuffer, CMClock?) -> Void)?
+    private var frameQueue: DispatchQueue?
+    /// Last place of the bubble on screen (kept after it is hidden), Cocoa coordinates.
+    private(set) var lastFrame: NSRect?
     private var session: AVCaptureSession?
     private let sessionQueue = DispatchQueue(label: "parker.camera.session")
     private var sizeIndex = 1
     private static let sizes: [CGFloat] = [120, 180, 260]
 
     var isVisible: Bool { panel != nil }
+
+    /// Where the bubble is now, or was when last hidden.
+    var currentFrame: NSRect? { panel?.frame ?? lastFrame }
+
+    /// Forgets the last position (new recording).
+    func resetLastFrame() { lastFrame = nil }
 
     /// Window number of the bubble, used to keep it in the recording.
     var windowID: CGWindowID? {
@@ -110,6 +121,8 @@ final class CameraBubble {
 
         self.panel = panel
         self.session = session
+        lastFrame = frame
+        attachFrameOutputIfNeeded()
         sessionQueue.async { session.startRunning() }
         return true
     }
@@ -125,9 +138,48 @@ final class CameraBubble {
         }
     }
 
+    /// Camera frames, delivered on `queue` while the bubble is visible (recorded separately so the
+    /// bubble can be moved after the recording). The clock is the one of the frame timestamps.
+    func setFrameHandler(queue: DispatchQueue?, _ handler: ((CMSampleBuffer, CMClock?) -> Void)?) {
+        frameHandler = handler
+        frameQueue = queue
+        if handler == nil {
+            if let session, let output = frameOutput {
+                sessionQueue.async {
+                    session.beginConfiguration()
+                    session.removeOutput(output)
+                    session.commitConfiguration()
+                }
+            }
+            frameOutput = nil
+        } else {
+            attachFrameOutputIfNeeded()
+        }
+    }
+
+    private func attachFrameOutputIfNeeded() {
+        guard frameOutput == nil, frameHandler != nil, let queue = frameQueue, let session else { return }
+        let output = AVCaptureVideoDataOutput()
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        output.alwaysDiscardsLateVideoFrames = true
+        output.setSampleBufferDelegate(self, queue: queue)
+        frameOutput = output
+        sessionQueue.async {
+            session.beginConfiguration()
+            if session.canAddOutput(output) { session.addOutput(output) }
+            session.commitConfiguration()
+        }
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        frameHandler?(sampleBuffer, session?.synchronizationClock)
+    }
+
     func hide() {
         guard let panel else { return }
+        lastFrame = panel.frame
         self.panel = nil
+        frameOutput = nil
         let session = self.session
         self.session = nil
         sessionQueue.async { session?.stopRunning() }

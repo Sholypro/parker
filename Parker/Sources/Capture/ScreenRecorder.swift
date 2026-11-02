@@ -53,6 +53,14 @@ class ScreenRecorder: NSObject {
     private var recordingArea: NSRect = .zero   // Cocoa coordinates, where the bubble starts
 
     var onRecordingFinished: ((URL) -> Void)?
+    /// MP4 recording done: the editor opens on it (trim, move the camera, share).
+    var onProjectFinished: ((RecordingProject) -> Void)?
+
+    // Editable recording: screen file + camera file written separately
+    private var project: RecordingProject?
+    private var cameraWriter: AVAssetWriter?
+    private var cameraWriterInput: AVAssetWriterInput?
+    private var cameraWriterFailed = false
 
     func startFullscreen() {
         Task {
@@ -102,13 +110,12 @@ class ScreenRecorder: NSObject {
     /// Excludes Parker's own application (toolbar, area border, toasts, thumbnails) from the video.
     /// `sharingType = .none` is ignored by ScreenCaptureKit on macOS 15+, so the filter is the only
     /// reliable way to keep these windows out of the recording (same approach as ScreenGrabber).
-    /// The webcam bubble is the one Parker window kept in the video.
+    /// The webcam bubble is excluded too: the camera is recorded in its own file and drawn at the
+    /// end, so it can be moved or resized in the editor after the recording.
     private func makeFilter(display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let ownApps = content.applications.filter { $0.processID == ownPID }
-        let bubble = bubbleWindowID
-        let kept = bubble == nil ? [] : content.windows.filter { $0.windowID == bubble }
-        return SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: kept)
+        return SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
     }
 
     // MARK: - Setup bar (camera, microphone, Mac sound, then Start)
@@ -214,6 +221,7 @@ class ScreenRecorder: NSObject {
             let area = self.cocoaArea(display: display, cropRect: cropRect)
             self.recordingDisplay = display
             self.recordingArea = area
+            self.cameraBubble.resetLastFrame()
             return area
         }
         guard Defaults.shared.recordWithCamera else { return false }
@@ -325,6 +333,11 @@ class ScreenRecorder: NSObject {
         audioInput = nil
         micInput = nil
         recordingURL = nil
+        project = nil
+        cameraWriter?.cancelWriting()
+        cameraWriter = nil
+        cameraWriterInput = nil
+        cameraBubble.setFrameHandler(queue: nil, nil)
 
         hideCamera()
         Toast.show(message: "Impossible de lancer l'enregistrement", style: .error)
@@ -409,8 +422,19 @@ class ScreenRecorder: NSObject {
         let recFormatter = DateFormatter()
         recFormatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss.SSS"
         let filename = "Recording \(recFormatter.string(from: Date()))"
-        let url = Defaults.shared.captureDirectory.appendingPathComponent("\(filename).mp4")
+        let output = Defaults.shared.captureDirectory.appendingPathComponent("\(filename).mp4")
+        let project = RecordingProject.create(outputURL: output)
+        self.project = project
+        let url = project.screenURL
         recordingURL = url
+        cameraWriter = nil
+        cameraWriterInput = nil
+        cameraWriterFailed = false
+        await MainActor.run {
+            self.cameraBubble.setFrameHandler(queue: self.sampleQueue) { [weak self] buffer, clock in
+                self?.handleCameraFrame(buffer, clock: clock)
+            }
+        }
 
         let writer = try AVAssetWriter(url: url, fileType: .mp4)
 
@@ -494,29 +518,123 @@ class ScreenRecorder: NSObject {
             totalPausedDuration += Date().timeIntervalSince(pauseStart)
             pauseStartDate = nil
         }
+        let layout = currentCameraLayout()
 
         Task {
-            try? await stream?.stopCapture()
-            stream = nil
-
-            videoInput?.markAsFinished()
-            audioInput?.markAsFinished()
-            micInput?.markAsFinished()
-            await assetWriter?.finishWriting()
-
-            // Microphone + Mac sound: two tracks, mixed into one so every player hears both
-            if audioInput != nil, micInput != nil, let url = recordingURL {
-                _ = await AudioMixdown.mergeAudioTracks(of: url)
-            }
-
+            let project = await finishWriting(layout: layout)
             await MainActor.run {
                 dismissToolbar()
-                if let url = recordingURL {
-                    Defaults.shared.addRecentCapture(url)
-                    onRecordingFinished?(url)
-                }
+                if let project { onProjectFinished?(project) }
             }
         }
+    }
+
+    /// Bubble position at the end of the recording, as a fraction of the recorded area.
+    private func currentCameraLayout() -> CameraLayout {
+        var layout = CameraLayout()
+        let area = recordingArea
+        guard let bubble = cameraBubble.currentFrame, area.width > 0, area.height > 0 else { return layout }
+        func clamp(_ v: Double, _ lo: Double = 0, _ hi: Double = 1) -> Double { min(max(v, lo), hi) }
+        layout.centerX = clamp(Double((bubble.midX - area.minX) / area.width))
+        layout.centerY = clamp(Double(1 - (bubble.midY - area.minY) / area.height))
+        layout.size = clamp(Double(bubble.width / min(area.width, area.height)), CameraLayout.minSize, CameraLayout.maxSize)
+        return layout
+    }
+
+    /// Stops the stream, closes the screen and camera files, mixes the sound, saves the project.
+    private func finishWriting(layout: CameraLayout) async -> RecordingProject? {
+        try? await stream?.stopCapture()
+        stream = nil
+        await MainActor.run { self.cameraBubble.setFrameHandler(queue: nil, nil) }
+
+        // Close everything from the sample queue, after the last sample already queued
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sampleQueue.async {
+                self.videoInput?.markAsFinished()
+                self.audioInput?.markAsFinished()
+                self.micInput?.markAsFinished()
+                self.cameraWriterInput?.markAsFinished()
+                continuation.resume()
+            }
+        }
+        await assetWriter?.finishWriting()
+        var hasCamera = false
+        if let cameraWriter {
+            await cameraWriter.finishWriting()
+            hasCamera = cameraWriter.status == .completed
+        }
+        self.cameraWriter = nil
+        self.cameraWriterInput = nil
+
+        // Microphone + Mac sound: two tracks, mixed into one so every player hears both
+        if audioInput != nil, micInput != nil, let url = recordingURL {
+            _ = await AudioMixdown.mergeAudioTracks(of: url)
+        }
+
+        guard var project = project, assetWriter?.status == .completed else { return nil }
+        project.hasCamera = hasCamera
+        project.layout = layout
+        project.save()
+        self.project = nil
+        return project
+    }
+
+    /// Camera frame (sample queue): written to the project's camera file on the screen's time line.
+    private func handleCameraFrame(_ buffer: CMSampleBuffer, clock: CMClock?) {
+        guard isRecording, !cameraWriterFailed, let imageBuffer = buffer.imageBuffer else { return }
+        var pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+        if let clock {
+            pts = CMSyncConvertTime(pts, from: clock, to: CMClockGetHostTimeClock())
+        }
+        guard firstSampleTime != nil, let time = remap(pts) else { return }
+
+        if cameraWriter == nil {
+            guard let project = project,
+                  let writer = try? AVAssetWriter(url: project.cameraURL, fileType: .mp4) else {
+                cameraWriterFailed = true
+                return
+            }
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: CVPixelBufferGetWidth(imageBuffer) & ~1,
+                AVVideoHeightKey: CVPixelBufferGetHeight(imageBuffer) & ~1,
+            ])
+            input.expectsMediaDataInRealTime = true
+            guard writer.canAdd(input) else { cameraWriterFailed = true; return }
+            writer.add(input)
+            guard writer.startWriting() else { cameraWriterFailed = true; return }
+            writer.startSession(atSourceTime: .zero)
+            cameraWriter = writer
+            cameraWriterInput = input
+        }
+        guard let input = cameraWriterInput, input.isReadyForMoreMediaData else { return }
+        let timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
+        if let copy = try? CMSampleBuffer(copying: buffer, withNewTiming: [timing]) {
+            input.append(copy)
+        }
+    }
+
+    /// Recording time of a host-clock timestamp: starts at zero, pauses removed.
+    /// nil while paused or before the start. Called on the sample queue only.
+    private func remap(_ pts: CMTime) -> CMTime? {
+        if firstSampleTime == nil {
+            firstSampleTime = pts
+            assetWriter?.startSession(atSourceTime: .zero)
+        }
+        if isPaused {
+            if pauseBeginTime == nil {
+                pauseBeginTime = pts
+            }
+            return nil
+        }
+        if let begin = pauseBeginTime {
+            let gap = CMTimeSubtract(pts, begin)
+            totalPausedCMTime = CMTimeAdd(totalPausedCMTime, gap)
+            pauseBeginTime = nil
+        }
+        guard let first = firstSampleTime else { return nil }
+        let remapped = CMTimeSubtract(CMTimeSubtract(pts, first), totalPausedCMTime)
+        return remapped.value >= 0 ? remapped : nil
     }
 
     func togglePause() {
@@ -863,19 +981,24 @@ class ScreenRecorder: NSObject {
         isRecording = false
         shouldExportGIF = false
 
+        let layout = currentCameraLayout()
         Task {
-            try? await stream?.stopCapture()
-            stream = nil
-
-            videoInput?.markAsFinished()
-            audioInput?.markAsFinished()
-            micInput?.markAsFinished()
-            await assetWriter?.finishWriting()
+            let project = await finishWriting(layout: layout)
+            // The GIF is made from the finished video (camera drawn in), next to it
+            var source = recordingURL
+            if let project {
+                if project.hasCamera {
+                    await MainActor.run { Toast.show(message: "Préparation du GIF…", style: .info) }
+                }
+                if (try? await RecordingRenderer().render(project)) != nil {
+                    source = project.outputURL
+                }
+            }
 
             await MainActor.run {
                 dismissToolbar()
 
-                guard let url = recordingURL else {
+                guard let url = source else {
                     Toast.show(message: "Échec de l'export GIF", style: .error)
                     return
                 }
@@ -985,29 +1108,7 @@ extension ScreenRecorder: SCStreamOutput {
         }
 
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-
-        if firstSampleTime == nil {
-            firstSampleTime = pts
-            assetWriter?.startSession(atSourceTime: .zero)
-        }
-
-        if isPaused {
-            if pauseBeginTime == nil {
-                pauseBeginTime = pts
-            }
-            return
-        }
-
-        if let begin = pauseBeginTime {
-            let gap = CMTimeSubtract(pts, begin)
-            totalPausedCMTime = CMTimeAdd(totalPausedCMTime, gap)
-            pauseBeginTime = nil
-        }
-
-        guard let first = firstSampleTime else { return }
-        let remapped = CMTimeSubtract(CMTimeSubtract(pts, first), totalPausedCMTime)
-
-        guard remapped.value >= 0 else { return }
+        guard let remapped = remap(pts) else { return }
 
         guard CMSampleBufferGetFormatDescription(sampleBuffer) != nil else { return }
         let timingInfo = CMSampleTimingInfo(

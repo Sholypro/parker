@@ -69,6 +69,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.thumbnailController.show(for: url)
             self?.menuBarController.rebuildMenu()
         }
+        screenRecorder.onProjectFinished = { [weak self] project in
+            RecordingEditorController.present(project) { url in
+                Defaults.shared.addRecentCapture(url)
+                self?.menuBarController.rebuildMenu()
+            }
+        }
 
         menuBarController = MenuBarController(
             captureEngine: captureEngine,
