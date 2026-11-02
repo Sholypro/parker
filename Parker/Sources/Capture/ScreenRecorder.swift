@@ -7,7 +7,9 @@ class ScreenRecorder: NSObject {
     private var stream: SCStream?
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
-    private var audioInput: AVAssetWriterInput?
+    private var audioInput: AVAssetWriterInput?      // sound played by the Mac
+    private var micInput: AVAssetWriterInput?        // microphone (second track, mixed at the end)
+    private let sampleQueue = DispatchQueue(label: "parker.recorder.samples")
     private let lock = NSLock()
     private var _isRecording = false
     private var _isPaused = false
@@ -55,21 +57,13 @@ class ScreenRecorder: NSObject {
     func startFullscreen() {
         Task {
             do {
-                var content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard let display = displayForMouseLocation(content.displays) else {
                     throw CaptureError.noDisplay
                 }
-                let cameraShown = await prepareCamera(display: display, cropRect: nil)
-                if cameraShown {
-                    content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                }
-                let filter = makeFilter(display: display, content: content)
-                if cameraShown {
-                    // With the camera: wait for the user to place it and press Start
-                    await MainActor.run { self.showReadyBar(filter: filter, display: display, cropRect: nil) }
-                } else {
-                    try await startRecording(filter: filter, display: display)
-                }
+                _ = await prepareCamera(display: display, cropRect: nil)
+                // Camera, microphone and sound are chosen in the setup bar, then Start
+                await MainActor.run { self.showReadyBar(display: display, cropRect: nil) }
             } catch {
                 NSLog("Recording failed: \(error)")
                 await handleStartFailure()
@@ -85,21 +79,13 @@ class ScreenRecorder: NSObject {
             case .success(let (rect, _)):
                 Task {
                     do {
-                        var content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                         guard let display = self.display(containing: rect, in: content.displays)
                                 ?? self.displayForMouseLocation(content.displays) else {
                             throw CaptureError.noDisplay
                         }
-                        let cameraShown = await self.prepareCamera(display: display, cropRect: rect)
-                        if cameraShown {
-                            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                        }
-                        let filter = self.makeFilter(display: display, content: content)
-                        if cameraShown {
-                            await MainActor.run { self.showReadyBar(filter: filter, display: display, cropRect: rect) }
-                        } else {
-                            try await self.startRecording(filter: filter, display: display, cropRect: rect)
-                        }
+                        _ = await self.prepareCamera(display: display, cropRect: rect)
+                        await MainActor.run { self.showReadyBar(display: display, cropRect: rect) }
                     } catch {
                         NSLog("Area recording failed: \(error)")
                         await self.handleStartFailure()
@@ -125,14 +111,14 @@ class ScreenRecorder: NSObject {
         return SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: kept)
     }
 
-    // MARK: - Ready bar (camera on: the user places the bubble, then presses Start)
+    // MARK: - Setup bar (camera, microphone, Mac sound, then Start)
 
-    private var readyWindow: NSPanel?
+    private var setupPanel: RecordingSetupPanel?
     private var readyLocalMonitor: Any?
     private var readyGlobalMonitor: Any?
     private var pendingStart: (() -> Void)?
 
-    private func showReadyBar(filter: SCContentFilter, display: SCDisplay, cropRect: CGRect?) {
+    private func showReadyBar(display: SCDisplay, cropRect: CGRect?) {
         if let crop = cropRect, borderWindow == nil {
             showAreaBorder(cgRect: crop)
         }
@@ -140,6 +126,9 @@ class ScreenRecorder: NSObject {
             Task {
                 guard let self = self else { return }
                 do {
+                    // The bubble may have been turned on or off in the bar: read the windows again
+                    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                    let filter = self.makeFilter(display: display, content: content)
                     try await self.startRecording(filter: filter, display: display, cropRect: cropRect)
                 } catch {
                     NSLog("Recording failed: \(error)")
@@ -148,71 +137,15 @@ class ScreenRecorder: NSObject {
             }
         }
 
-        let center = NSPoint(x: recordingArea.midX, y: recordingArea.midY)
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main else { return }
-        let width: CGFloat = 440
-        let height: CGFloat = 56
-        let panel = NSPanel(
-            contentRect: NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height - 12, width: width, height: height),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.level = .floating
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
-        panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-
-        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-        effect.blendingMode = .behindWindow
-        effect.material = .hudWindow
-        effect.state = .active
-        effect.wantsLayer = true
-        effect.layer?.cornerRadius = 14
-        effect.layer?.masksToBounds = true
-
-        let label = NSTextField(labelWithString: "Place ta caméra, puis lance l’enregistrement")
-        label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.textColor = .white.withAlphaComponent(0.8)
-        label.frame = NSRect(x: 16, y: 19, width: 220, height: 18)
-        label.lineBreakMode = .byTruncatingTail
-        effect.addSubview(label)
-
-        let cancel = NSButton(title: "Annuler", target: self, action: #selector(readyCancelClicked))
-        cancel.bezelStyle = .accessoryBarAction
-        cancel.isBordered = false
-        cancel.contentTintColor = .white.withAlphaComponent(0.6)
-        cancel.font = .systemFont(ofSize: 12, weight: .medium)
-        cancel.frame = NSRect(x: 246, y: 14, width: 70, height: 28)
-        cancel.toolTip = "Annuler (Échap)"
-        effect.addSubview(cancel)
-
-        let start = NSButton(title: "Démarrer", target: self, action: #selector(readyStartClicked))
-        start.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: nil)
-        start.imagePosition = .imageLeading
-        start.bezelStyle = .accessoryBarAction
-        start.isBordered = false
-        start.wantsLayer = true
-        start.layer?.backgroundColor = NSColor.systemRed.cgColor
-        start.layer?.cornerRadius = 8
-        start.contentTintColor = .white
-        start.attributedTitle = NSAttributedString(string: " Démarrer", attributes: [
-            .foregroundColor: NSColor.white,
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-        ])
-        start.frame = NSRect(x: 322, y: 12, width: 104, height: 32)
-        start.toolTip = "Lancer l’enregistrement (Entrée)"
-        effect.addSubview(start)
-
-        panel.contentView = effect
-        panel.orderFrontRegardless()
-        readyWindow = panel
+        let panel = RecordingSetupPanel()
+        panel.onStart = { [weak self] in self?.readyStartClicked() }
+        panel.onCancel = { [weak self] in self?.readyCancelClicked() }
+        panel.onCameraChange = { [weak self] device in self?.setupCameraChanged(device) }
+        panel.show(near: recordingArea)
+        setupPanel = panel
 
         readyLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self, self.readyWindow != nil else { return event }
+            guard let self = self, self.setupPanel != nil else { return event }
             switch event.keyCode {
             case 36, 76: self.readyStartClicked(); return nil   // Return / Enter
             case 53: self.readyCancelClicked(); return nil      // Escape
@@ -225,14 +158,35 @@ class ScreenRecorder: NSObject {
         }
     }
 
-    @objc private func readyStartClicked() {
+    private func setupCameraChanged(_ device: AVCaptureDevice?) {
+        guard let device else {
+            cameraBubble.hide()
+            bubbleWindowID = nil
+            return
+        }
+        CameraBubble.requestAccess { [weak self] granted in
+            guard let self = self, self.setupPanel != nil else { return }
+            guard granted else { self.reportCameraDenied(); return }
+            Defaults.shared.recordWithCamera = true
+            if self.cameraBubble.isVisible {
+                self.cameraBubble.switchCamera(to: device)
+            } else if self.cameraBubble.show(in: self.recordingArea) {
+                self.bubbleWindowID = self.cameraBubble.windowID
+            } else {
+                Toast.show(message: "Aucune caméra trouvée", style: .error)
+            }
+        }
+    }
+
+    private func readyStartClicked() {
+        guard setupPanel != nil else { return }
         let start = pendingStart
         dismissReadyBar()
         start?()
     }
 
-    @objc private func readyCancelClicked() {
-        guard readyWindow != nil else { return }
+    private func readyCancelClicked() {
+        guard setupPanel != nil else { return }
         dismissReadyBar()
         borderWindow?.orderOut(nil)
         borderWindow = nil
@@ -241,8 +195,8 @@ class ScreenRecorder: NSObject {
 
     private func dismissReadyBar() {
         pendingStart = nil
-        readyWindow?.orderOut(nil)
-        readyWindow = nil
+        setupPanel?.close()
+        setupPanel = nil
         if let monitor = readyLocalMonitor { NSEvent.removeMonitor(monitor); readyLocalMonitor = nil }
         if let monitor = readyGlobalMonitor { NSEvent.removeMonitor(monitor); readyGlobalMonitor = nil }
     }
@@ -365,6 +319,7 @@ class ScreenRecorder: NSObject {
         assetWriter = nil
         videoInput = nil
         audioInput = nil
+        micInput = nil
         recordingURL = nil
 
         hideCamera()
@@ -431,10 +386,21 @@ class ScreenRecorder: NSObject {
             config.height = size.height
         }
 
-        // Enable system audio capture
-        config.capturesAudio = true
+        // Sound played by the Mac (option in the setup bar)
+        let withSystemAudio = Defaults.shared.recordSystemAudio
+        config.capturesAudio = withSystemAudio
         config.sampleRate = 48000
         config.channelCount = 2
+
+        // Microphone (macOS 15+): captured by the same stream, so it stays in sync with the image
+        var withMicrophone = false
+        if #available(macOS 15.0, *), Defaults.shared.recordMicrophone,
+           AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+           let mic = MicLevelMonitor.preferredMicrophone() {
+            config.captureMicrophone = true
+            config.microphoneCaptureDeviceID = mic.uniqueID
+            withMicrophone = true
+        }
 
         let recFormatter = DateFormatter()
         recFormatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss.SSS"
@@ -460,18 +426,41 @@ class ScreenRecorder: NSObject {
             AVNumberOfChannelsKey: 2,
             AVEncoderBitRateKey: 128000,
         ]
-        let aInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-        aInput.expectsMediaDataInRealTime = true
-        writer.add(aInput)
-        self.audioInput = aInput
+        if withSystemAudio {
+            let aInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            aInput.expectsMediaDataInRealTime = true
+            writer.add(aInput)
+            self.audioInput = aInput
+        } else {
+            self.audioInput = nil
+        }
+        if withMicrophone {
+            let mInput = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48000,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 96000,
+            ])
+            mInput.expectsMediaDataInRealTime = true
+            writer.add(mInput)
+            self.micInput = mInput
+        } else {
+            self.micInput = nil
+        }
 
         self.assetWriter = writer
 
         writer.startWriting()
 
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
-        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
+        // One serial queue for every sample: the timing state below is shared by all of them
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
+        if withSystemAudio {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
+        }
+        if #available(macOS 15.0, *), withMicrophone {
+            try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: sampleQueue)
+        }
         try await stream.startCapture()
 
         self.stream = stream
@@ -508,7 +497,13 @@ class ScreenRecorder: NSObject {
 
             videoInput?.markAsFinished()
             audioInput?.markAsFinished()
+            micInput?.markAsFinished()
             await assetWriter?.finishWriting()
+
+            // Microphone + Mac sound: two tracks, mixed into one so every player hears both
+            if audioInput != nil, micInput != nil, let url = recordingURL {
+                _ = await AudioMixdown.mergeAudioTracks(of: url)
+            }
 
             await MainActor.run {
                 dismissToolbar()
@@ -870,6 +865,7 @@ class ScreenRecorder: NSObject {
 
             videoInput?.markAsFinished()
             audioInput?.markAsFinished()
+            micInput?.markAsFinished()
             await assetWriter?.finishWriting()
 
             await MainActor.run {
@@ -1028,9 +1024,9 @@ extension ScreenRecorder: SCStreamOutput {
                 audioInput.append(remappedBuffer)
             }
         case .microphone:
-            guard let audioInput = audioInput, audioInput.isReadyForMoreMediaData else { return }
+            guard let micInput = micInput, micInput.isReadyForMoreMediaData else { return }
             if let remappedBuffer = try? CMSampleBuffer(copying: sampleBuffer, withNewTiming: [timingInfo]) {
-                audioInput.append(remappedBuffer)
+                micInput.append(remappedBuffer)
             }
         @unknown default:
             break

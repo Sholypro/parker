@@ -40,12 +40,27 @@ final class CameraBubble {
         }
     }
 
+    /// Cameras plugged in (built-in, USB, Continuity Camera).
+    static func availableCameras() -> [AVCaptureDevice] {
+        var types: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .external]
+        if #available(macOS 14.0, *) { types.append(.continuityCamera) }
+        return AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: .unspecified).devices
+    }
+
+    /// The camera chosen in the recording setup, or the system default.
+    static func preferredCamera() -> AVCaptureDevice? {
+        if let id = Defaults.shared.cameraID, let device = AVCaptureDevice(uniqueID: id) {
+            return device
+        }
+        return AVCaptureDevice.default(for: .video)
+    }
+
     /// Shows the bubble in the bottom-right corner of `area` (Cocoa coordinates).
     /// Returns false when no camera is available.
     @discardableResult
     func show(in area: NSRect) -> Bool {
         guard panel == nil else { return true }
-        guard let device = AVCaptureDevice.default(for: .video),
+        guard let device = Self.preferredCamera(),
               let input = try? AVCaptureDeviceInput(device: device) else { return false }
 
         let session = AVCaptureSession()
@@ -97,6 +112,17 @@ final class CameraBubble {
         self.session = session
         sessionQueue.async { session.startRunning() }
         return true
+    }
+
+    /// Switches the live bubble to another camera (keeps its place and size).
+    func switchCamera(to device: AVCaptureDevice) {
+        guard let session, let input = try? AVCaptureDeviceInput(device: device) else { return }
+        sessionQueue.async {
+            session.beginConfiguration()
+            for old in session.inputs { session.removeInput(old) }
+            if session.canAddInput(input) { session.addInput(input) }
+            session.commitConfiguration()
+        }
     }
 
     func hide() {

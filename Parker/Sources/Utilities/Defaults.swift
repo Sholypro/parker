@@ -134,6 +134,30 @@ class Defaults {
         set { store.set(newValue, forKey: "recordWithCamera") }
     }
 
+    /// Camera used for the webcam bubble (nil: system default).
+    var cameraID: String? {
+        get { store.string(forKey: "cameraID") }
+        set { store.set(newValue, forKey: "cameraID") }
+    }
+
+    /// Records the microphone with screen recordings.
+    var recordMicrophone: Bool {
+        get { store.bool(forKey: "recordMicrophone") }
+        set { store.set(newValue, forKey: "recordMicrophone") }
+    }
+
+    /// Microphone used in recordings (nil: system default).
+    var microphoneID: String? {
+        get { store.string(forKey: "microphoneID") }
+        set { store.set(newValue, forKey: "microphoneID") }
+    }
+
+    /// Records the sound played by the Mac (on by default).
+    var recordSystemAudio: Bool {
+        get { store.object(forKey: "recordSystemAudio") as? Bool ?? true }
+        set { store.set(newValue, forKey: "recordSystemAudio") }
+    }
+
     // GIF export settings
     var gifMaxWidth: Int {
         get { let v = store.integer(forKey: "gifMaxWidth"); return v > 0 ? v : 640 }
