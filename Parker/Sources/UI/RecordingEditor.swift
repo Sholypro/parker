@@ -44,6 +44,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
     // Cuts in the middle
     private var segments: [Segment] = []
     private var selectedSegment: Int?
+    private var cameraMissing = false
 
     init(project: RecordingProject) {
         self.project = project
@@ -227,6 +228,9 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
                 self.overlay.videoSize = size
                 self.overlay.layout = self.project.hasCamera ? self.project.layout : nil
                 self.observeTime()
+                if self.project.hasCamera && built.videoComposition == nil {
+                    self.cameraMissing = true
+                }
                 self.updateTime()
             }
         } catch {
@@ -254,7 +258,8 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
                     guard self.renderer === renderer else { return }
                     self.isRendering = false
                     self.isRendered = true
-                    self.statusLabel.stringValue = self.isDirty ? "Modifications non enregistrées" : "Vidéo prête"
+                    self.statusLabel.stringValue = self.isDirty ? "Modifications non enregistrées"
+                        : (self.cameraMissing ? "Vidéo prête (images de la caméra introuvables)" : "Vidéo prête")
                     self.updateButtons()
                     self.onRendered?(snapshot.outputURL)
                     let pending = self.afterRender
