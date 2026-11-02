@@ -15,6 +15,13 @@ struct CameraLayout: Codable, Equatable {
     static let maxSize = 0.50
 }
 
+/// A piece of the recording between two cuts. `removed` pieces are left out of the video.
+struct Segment: Codable, Equatable {
+    var start: Double
+    var end: Double
+    var removed: Bool = false
+}
+
 /// One screen recording kept editable: the screen video (sound included) and, if the camera
 /// was on, the camera video recorded separately, so the bubble can be moved after the fact.
 /// Files live in ~/Library/Application Support/Parker/Projects/<id>/.
@@ -27,6 +34,32 @@ struct RecordingProject: Codable {
     var trimStart: Double = 0
     /// nil: until the end.
     var trimEnd: Double?
+    /// Cuts in the middle (nil: one piece).
+    var segments: [Segment]?
+
+    /// Pieces covering the whole recording.
+    func allSegments(duration: Double) -> [Segment] {
+        guard let segments, !segments.isEmpty else { return [Segment(start: 0, end: duration)] }
+        return segments
+    }
+
+    /// What ends up in the video: kept pieces inside the start and end handles, in order.
+    func keptRanges(duration: Double) -> [(start: Double, end: Double)] {
+        let lo = max(0, trimStart)
+        let hi = min(trimEnd ?? duration, duration)
+        var result: [(start: Double, end: Double)] = []
+        for segment in allSegments(duration: duration) where !segment.removed {
+            let s = max(segment.start, lo)
+            let e = min(segment.end, hi)
+            guard e - s > 0.01 else { continue }
+            if let last = result.last, abs(last.end - s) < 0.01 {
+                result[result.count - 1].end = e
+            } else {
+                result.append((s, e))
+            }
+        }
+        return result
+    }
 
     var folder: URL { Self.projectsDirectory.appendingPathComponent(id, isDirectory: true) }
     var screenURL: URL { folder.appendingPathComponent("screen.mp4") }
@@ -104,46 +137,60 @@ enum RecordingComposer {
     }
 
     /// Screen + sound + (optionally) the camera bubble drawn by `CameraOverlayCompositor`.
-    static func build(_ project: RecordingProject) async throws -> Built {
+    /// `ranges` (seconds): pieces to keep, played one after the other. nil: the whole recording.
+    static func build(_ project: RecordingProject, ranges: [(start: Double, end: Double)]? = nil) async throws -> Built {
         let screen = AVURLAsset(url: project.screenURL)
         guard let screenVideo = try await screen.loadTracks(withMediaType: .video).first else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        let duration = try await screen.load(.duration)
+        let sourceDuration = try await screen.load(.duration)
 
-        var cameraTrackSource: AVAssetTrack?
+        var cameraSource: AVAssetTrack?
         if project.hasCamera, FileManager.default.fileExists(atPath: project.cameraURL.path) {
             let camera = AVURLAsset(url: project.cameraURL)
-            cameraTrackSource = try? await camera.loadTracks(withMediaType: .video).first
+            cameraSource = try? await camera.loadTracks(withMediaType: .video).first
         }
-        guard let cameraSource = cameraTrackSource else {
-            return Built(asset: screen, videoComposition: nil, duration: duration)
+        if cameraSource == nil && ranges == nil {
+            return Built(asset: screen, videoComposition: nil, duration: sourceDuration)
+        }
+
+        let pieces: [CMTimeRange] = (ranges ?? [(0, sourceDuration.seconds)]).map {
+            CMTimeRange(start: CMTime(seconds: $0.start, preferredTimescale: 600),
+                        end: CMTimeMinimum(CMTime(seconds: $0.end, preferredTimescale: 600), sourceDuration))
         }
 
         let composition = AVMutableComposition()
-        let full = CMTimeRange(start: .zero, duration: duration)
         guard let screenTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        try screenTrack.insertTimeRange(full, of: screenVideo, at: .zero)
+        let screenRange = try await screenVideo.load(.timeRange)
+        insert(pieces, from: screenVideo, sourceRange: screenRange, offset: .zero, into: screenTrack)
 
         for audio in try await screen.loadTracks(withMediaType: .audio) {
             let range = try await audio.load(.timeRange)
             if let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try? track.insertTimeRange(range, of: audio, at: range.start)
+                insert(pieces, from: audio, sourceRange: range, offset: .zero, into: track)
             }
         }
 
         var cameraTrackID = kCMPersistentTrackID_Invalid
-        let cameraRange = try await cameraSource.load(.timeRange)
-        if let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            // The camera file shares the screen's time line (same zero), so it goes at the same time
-            let start = cameraRange.start
-            let end = CMTimeMinimum(cameraRange.end, duration)
-            if end > start {
-                try? track.insertTimeRange(CMTimeRange(start: start, end: end), of: cameraSource, at: start)
+        if let cameraSource, let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let cameraRange = try await cameraSource.load(.timeRange)
+            // The camera file shares the screen's time line. If it does not line up at all
+            // (older recordings), it is laid from the start instead of being lost.
+            var offset = CMTime.zero
+            if cameraRange.start >= sourceDuration || cameraRange.duration.seconds <= 0 {
+                offset = CMTimeSubtract(.zero, cameraRange.start)
+            }
+            insert(pieces, from: cameraSource, sourceRange: cameraRange, offset: offset, into: track)
+            if !track.segments.isEmpty {
                 cameraTrackID = track.trackID
             }
+        }
+
+        let duration = composition.duration
+        guard cameraTrackID != kCMPersistentTrackID_Invalid else {
+            return Built(asset: composition, videoComposition: nil, duration: duration)
         }
 
         let renderSize = try await screenVideo.load(.naturalSize)
@@ -153,13 +200,30 @@ enum RecordingComposer {
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
         videoComposition.instructions = [
             CameraOverlayInstruction(
-                timeRange: full,
+                timeRange: CMTimeRange(start: .zero, duration: duration),
                 screenTrackID: screenTrack.trackID,
                 cameraTrackID: cameraTrackID,
                 layout: project.layout
             ),
         ]
         return Built(asset: composition, videoComposition: videoComposition, duration: duration)
+    }
+
+    /// Lays each kept piece of `source` one after the other. `offset` moves the source's own
+    /// times onto the recording's time line.
+    private static func insert(_ pieces: [CMTimeRange], from source: AVAssetTrack, sourceRange: CMTimeRange,
+                               offset: CMTime, into track: AVMutableCompositionTrack) {
+        var cursor = CMTime.zero
+        for piece in pieces {
+            // Piece in the source's own times
+            let wanted = CMTimeRange(start: CMTimeSubtract(piece.start, offset), duration: piece.duration)
+            let available = wanted.intersection(sourceRange)
+            if available.duration.seconds > 0 {
+                let at = CMTimeAdd(cursor, CMTimeSubtract(available.start, wanted.start))
+                try? track.insertTimeRange(available, of: source, at: at)
+            }
+            cursor = CMTimeAdd(cursor, piece.duration)
+        }
     }
 
     /// Same composition with a new bubble layout (used live by the editor).
@@ -191,19 +255,19 @@ final class RecordingRenderer {
     /// Writes the finished video to `project.outputURL` (replacing it).
     func render(_ project: RecordingProject) async throws {
         cancel()
-        let built = try await RecordingComposer.build(project)
-        let start = CMTime(seconds: max(0, project.trimStart), preferredTimescale: 600)
-        let end = project.trimEnd.map { CMTime(seconds: $0, preferredTimescale: 600) } ?? built.duration
-        let range = CMTimeRange(start: start, end: CMTimeMinimum(end, built.duration))
-        let isFull = start.seconds < 0.01 && range.end.seconds >= built.duration.seconds - 0.01
+        let sourceDuration = (try? await AVURLAsset(url: project.screenURL).load(.duration).seconds) ?? 0
+        let kept = project.keptRanges(duration: sourceDuration)
+        guard !kept.isEmpty else { throw CocoaError(.fileWriteUnknown) }
+        let isFull = kept.count == 1 && kept[0].start < 0.01 && kept[0].end >= sourceDuration - 0.01
+        let built = try await RecordingComposer.build(project, ranges: isFull ? nil : kept)
 
         let output = project.outputURL
         let fm = FileManager.default
         try? fm.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let tmp = output.deletingLastPathComponent().appendingPathComponent(".parker-\(UUID().uuidString).mp4")
 
         // Nothing to draw and nothing cut: the screen file is the result
         if built.videoComposition == nil && isFull {
-            let tmp = output.deletingLastPathComponent().appendingPathComponent(".parker-\(UUID().uuidString).mp4")
             try fm.copyItem(at: project.screenURL, to: tmp)
             try replace(output, with: tmp)
             return
@@ -213,10 +277,8 @@ final class RecordingRenderer {
         guard let session = AVAssetExportSession(asset: built.asset, presetName: preset) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        let tmp = output.deletingLastPathComponent().appendingPathComponent(".parker-\(UUID().uuidString).mp4")
         session.outputURL = tmp
         session.outputFileType = .mp4
-        session.timeRange = range
         session.videoComposition = built.videoComposition
         session.shouldOptimizeForNetworkUse = true
         self.session = session

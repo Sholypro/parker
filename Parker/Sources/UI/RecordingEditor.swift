@@ -38,6 +38,12 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
     private var cameraCheck: NSButton?
     private var sizeSlider: NSSlider?
     private var layoutWork: DispatchWorkItem?
+    private var cutButton: NSButton!
+    private var removeButton: NSButton!
+
+    // Cuts in the middle
+    private var segments: [Segment] = []
+    private var selectedSegment: Int?
 
     init(project: RecordingProject) {
         self.project = project
@@ -69,6 +75,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.onSpace = { [weak self] in self?.togglePlay() }
+        window.onDelete = { [weak self] in self?.removeClicked() }
         window.center()
 
         let content = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
@@ -125,18 +132,32 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
             content.addSubview(slider)
             sizeSlider = slider
 
-            let hint = NSTextField(labelWithString: "Glisse la bulle dans la vidéo pour la déplacer")
-            hint.font = .systemFont(ofSize: 11)
-            hint.textColor = .white.withAlphaComponent(0.35)
-            hint.alignment = .right
-            hint.frame = NSRect(x: width - 640, y: 135, width: 300, height: 16)
-            content.addSubview(hint)
+            overlay.toolTip = "Glisse la bulle pour la déplacer"
         }
+
+        // Cut in the middle: split at the playhead, then remove the selected piece
+        cutButton = textButton("Couper ici", action: #selector(splitClicked))
+        cutButton.image = NSImage(systemSymbolName: "scissors", accessibilityDescription: nil)
+        cutButton.imagePosition = .imageLeading
+        cutButton.frame = NSRect(x: 226, y: 128, width: 130, height: 32)
+        cutButton.keyEquivalent = "b"
+        cutButton.keyEquivalentModifierMask = .command
+        cutButton.toolTip = "Couper la vidéo à la tête de lecture (⌘B)"
+        content.addSubview(cutButton)
+
+        removeButton = textButton("Supprimer le passage", action: #selector(removeClicked))
+        removeButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        removeButton.imagePosition = .imageLeading
+        removeButton.frame = NSRect(x: 362, y: 128, width: 200, height: 32)
+        removeButton.toolTip = "Retirer le passage sélectionné de la vidéo (touche Suppr)"
+        content.addSubview(removeButton)
 
         // Trim bar
         trimBar = TrimBarView(frame: NSRect(x: 20, y: 66, width: width - 40, height: 52))
         trimBar.onSeek = { [weak self] t in self?.seek(to: t) }
         trimBar.onTrimChange = { [weak self] start, end, edge in self?.trimChanged(start: start, end: end, edge: edge) }
+        trimBar.onSelect = { [weak self] index in self?.selectSegment(index) }
+        trimBar.onSplitMove = { [weak self] index, time in self?.moveSplit(index, to: time) }
         content.addSubview(trimBar)
 
         // Bottom row: status, actions
@@ -201,6 +222,8 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
                 self.trimBar.start = self.project.trimStart
                 self.trimBar.end = self.project.trimEnd ?? self.duration
                 self.trimBar.thumbnails = frames
+                self.segments = self.project.allSegments(duration: self.duration)
+                self.syncSegments()
                 self.overlay.videoSize = size
                 self.overlay.layout = self.project.hasCamera ? self.project.layout : nil
                 self.observeTime()
@@ -295,9 +318,20 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
             guard let self else { return }
             let t = self.player.currentTime().seconds
             let end = self.project.trimEnd ?? self.duration
-            if self.player.rate > 0, t >= end - 0.02 {
-                self.player.pause()
-                self.seek(to: self.project.trimStart)
+            if self.player.rate > 0 {
+                if t >= end - 0.02 {
+                    self.player.pause()
+                    self.seek(to: self.project.trimStart)
+                } else if let removed = self.segments.first(where: { $0.removed && t >= $0.start && t < $0.end - 0.02 }) {
+                    // Jump over a removed piece, like in the final video
+                    if removed.end >= end - 0.02 {
+                        self.player.pause()
+                        self.seek(to: self.project.trimStart)
+                    } else {
+                        self.player.seek(to: CMTime(seconds: removed.end, preferredTimescale: 600),
+                                         toleranceBefore: .zero, toleranceAfter: .zero)
+                    }
+                }
             }
             self.updateTime()
         }
@@ -306,9 +340,11 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
     private func updateTime() {
         let t = player.currentTime().seconds
         trimBar.playhead = t.isFinite ? t : 0
-        let start = project.trimStart
-        let end = project.trimEnd ?? duration
-        timeLabel.stringValue = "\(Self.format(max(0, t - start))) / \(Self.format(max(0, end - start)))"
+        // Times of the final video: removed pieces and trimmed ends do not count
+        let kept = project.keptRanges(duration: duration)
+        let total = kept.reduce(0) { $0 + ($1.end - $1.start) }
+        let elapsed = kept.reduce(0) { $0 + max(0, min(t, $1.end) - $1.start) }
+        timeLabel.stringValue = "\(Self.format(elapsed)) / \(Self.format(total))"
         let playing = player.rate > 0
         playButton.image = NSImage(systemSymbolName: playing ? "pause.fill" : "play.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 15, weight: .semibold))
@@ -332,6 +368,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         trimBar.playhead = seconds
         updateTime()
+        updateCutButtons()
     }
 
     // MARK: - Edits
@@ -361,6 +398,89 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
             // Redraw the paused frame with the new layout
             player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
         }
+    }
+
+    private func syncSegments() {
+        project.segments = segments.count > 1 ? segments : nil
+        trimBar.segments = segments
+        trimBar.selected = selectedSegment
+        updateCutButtons()
+        updateTime()
+    }
+
+    private func updateCutButtons() {
+        let t = player.currentTime().seconds
+        let canSplit = segments.contains { t > $0.start + 0.2 && t < $0.end - 0.2 }
+        cutButton?.isEnabled = canSplit
+        if let index = selectedSegment, segments.indices.contains(index), segments.count > 1 {
+            removeButton?.isEnabled = true
+            removeButton?.title = segments[index].removed ? "Remettre le passage" : "Supprimer le passage"
+            removeButton?.image = NSImage(systemSymbolName: segments[index].removed ? "arrow.uturn.backward" : "trash",
+                                          accessibilityDescription: nil)
+        } else {
+            removeButton?.isEnabled = false
+            removeButton?.title = "Supprimer le passage"
+            removeButton?.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        }
+    }
+
+    @objc private func splitClicked() {
+        let t = player.currentTime().seconds
+        guard let index = segments.firstIndex(where: { t > $0.start + 0.2 && t < $0.end - 0.2 }) else { return }
+        player.pause()
+        let piece = segments[index]
+        segments[index].end = t
+        segments.insert(Segment(start: t, end: piece.end, removed: piece.removed), at: index + 1)
+        selectedSegment = index + 1
+        syncSegments()
+        markDirty()
+    }
+
+    @objc private func removeClicked() {
+        guard let index = selectedSegment, segments.indices.contains(index), segments.count > 1 else { return }
+        segments[index].removed.toggle()
+        var check = project
+        check.segments = segments
+        if check.keptRanges(duration: duration).isEmpty && segments[index].removed {
+            // Never remove everything
+            segments[index].removed = false
+            Toast.show(message: "Il faut garder au moins un passage", style: .error)
+            return
+        }
+        // Two neighbours with the same state become one piece again
+        var merged: [Segment] = []
+        for piece in segments {
+            if let last = merged.last, last.removed == piece.removed, !piece.removed {
+                merged[merged.count - 1].end = piece.end
+            } else {
+                merged.append(piece)
+            }
+        }
+        let keepSelection = merged.count == segments.count
+        segments = merged
+        selectedSegment = keepSelection ? index : nil
+        syncSegments()
+        markDirty()
+    }
+
+    private func selectSegment(_ index: Int?) {
+        selectedSegment = index
+        trimBar.selected = index
+        updateCutButtons()
+    }
+
+    /// Moves the cut between piece `index` and `index + 1`.
+    private func moveSplit(_ index: Int, to time: Double) {
+        guard index >= 0, index + 1 < segments.count else { return }
+        let lo = segments[index].start + 0.2
+        let hi = segments[index + 1].end - 0.2
+        let t = min(max(time, lo), hi)
+        segments[index].end = t
+        segments[index + 1].start = t
+        player.pause()
+        seek(to: t)
+        syncSegments()
+        markDirty()
     }
 
     @objc private func cameraToggled() {
@@ -482,10 +602,13 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
 
 private final class EditorWindow: NSWindow {
     var onSpace: (() -> Void)?
+    var onDelete: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 49 { // Space
             onSpace?()
+        } else if event.keyCode == 51 || event.keyCode == 117 { // Delete, Forward delete
+            onDelete?()
         } else {
             super.keyDown(with: event)
         }
@@ -613,6 +736,12 @@ final class TrimBarView: NSView {
 
     var onSeek: ((Double) -> Void)?
     var onTrimChange: ((Double, Double, Edge) -> Void)?
+    var onSelect: ((Int?) -> Void)?
+    /// Index of the cut that moved (between piece i and i + 1), new time.
+    var onSplitMove: ((Int, Double) -> Void)?
+
+    var segments: [Segment] = [] { didSet { needsDisplay = true } }
+    var selected: Int? { didSet { needsDisplay = true } }
 
     var duration: Double = 1 { didSet { needsDisplay = true } }
     var start: Double = 0 { didSet { needsDisplay = true } }
@@ -620,7 +749,7 @@ final class TrimBarView: NSView {
     var playhead: Double = 0 { didSet { needsDisplay = true } }
     var thumbnails: [CGImage] = [] { didSet { needsDisplay = true } }
 
-    private enum Drag { case start, end, playhead }
+    private enum Drag { case start, end, playhead, split(Int) }
     private var drag: Drag?
     private let handleWidth: CGFloat = 12
     private let accent = NSColor(red: 1.0, green: 0.78, blue: 0.16, alpha: 1)
@@ -657,7 +786,37 @@ final class TrimBarView: NSView {
                 ctx.restoreGState()
             }
         }
-        // Dim what is cut
+        // Removed pieces: dark with red stripes
+        for piece in segments where piece.removed {
+            let r = NSRect(x: x(for: piece.start), y: t.minY, width: x(for: piece.end) - x(for: piece.start), height: t.height)
+            NSColor.black.withAlphaComponent(0.7).setFill()
+            r.fill()
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: r).addClip()
+            NSColor.systemRed.withAlphaComponent(0.45).setStroke()
+            var sx = r.minX - r.height
+            while sx < r.maxX {
+                let stripe = NSBezierPath()
+                stripe.move(to: NSPoint(x: sx, y: r.minY))
+                stripe.line(to: NSPoint(x: sx + r.height, y: r.maxY))
+                stripe.lineWidth = 2
+                stripe.stroke()
+                sx += 9
+            }
+            NSGraphicsContext.restoreGraphicsState()
+        }
+        // Selected piece
+        if let index = selected, segments.indices.contains(index), segments.count > 1 {
+            let piece = segments[index]
+            let r = NSRect(x: x(for: piece.start), y: t.minY, width: x(for: piece.end) - x(for: piece.start), height: t.height)
+            NSColor(red: 0.04, green: 0.52, blue: 1.0, alpha: 0.22).setFill()
+            r.fill()
+            let border = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1))
+            border.lineWidth = 2
+            NSColor(red: 0.04, green: 0.52, blue: 1.0, alpha: 1).setStroke()
+            border.stroke()
+        }
+        // Dim what is trimmed
         NSColor.black.withAlphaComponent(0.6).setFill()
         NSRect(x: t.minX, y: t.minY, width: x(for: start) - t.minX, height: t.height).fill()
         NSRect(x: x(for: end), y: t.minY, width: t.maxX - x(for: end), height: t.height).fill()
@@ -679,6 +838,18 @@ final class TrimBarView: NSView {
             NSBezierPath(roundedRect: grip, xRadius: 1, yRadius: 1).fill()
         }
 
+        // Cuts: white markers with a small grip, draggable
+        for piece in segments.dropLast() {
+            let cx = x(for: piece.end)
+            NSColor.white.setFill()
+            NSRect(x: cx - 1, y: bounds.minY + 2, width: 2, height: bounds.height - 4).fill()
+            NSBezierPath(ovalIn: NSRect(x: cx - 5, y: bounds.maxY - 12, width: 10, height: 10)).fill()
+            if let scissors = NSImage(systemSymbolName: "scissors", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 7, weight: .bold)) {
+                scissors.draw(in: NSRect(x: cx - 4, y: bounds.maxY - 11, width: 8, height: 8))
+            }
+        }
+
         // Playhead
         let px = x(for: min(max(playhead, 0), duration))
         NSColor.white.setFill()
@@ -688,13 +859,17 @@ final class TrimBarView: NSView {
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         let sx = x(for: start), ex = x(for: end)
-        if p.x >= sx - handleWidth - 4 && p.x <= sx + 4 {
+        if let cut = segments.dropLast().indices.first(where: { abs(x(for: segments[$0].end) - p.x) <= 5 }) {
+            drag = .split(cut)
+        } else if p.x >= sx - handleWidth - 4 && p.x <= sx + 4 {
             drag = .start
         } else if p.x >= ex - 4 && p.x <= ex + handleWidth + 4 {
             drag = .end
         } else {
             drag = .playhead
-            onSeek?(min(max(time(at: p.x), start), end))
+            let t = time(at: p.x)
+            onSelect?(segments.firstIndex { t >= $0.start && t < $0.end })
+            onSeek?(min(max(t, start), end))
         }
     }
 
@@ -711,6 +886,8 @@ final class TrimBarView: NSView {
             onTrimChange?(start, end, .end)
         case .playhead:
             onSeek?(min(max(t, start), end))
+        case .split(let index):
+            onSplitMove?(index, t)
         case nil:
             break
         }

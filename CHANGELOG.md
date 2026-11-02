@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.19
+- Correction : la caméra n'apparaissait pas dans la fenêtre de montage. Elle est de nouveau visible, et les enregistrements faits avec la 2.18 la retrouvent aussi (Mac).
+- Montage : coupe au milieu de la vidéo. Place la tête de lecture, clique sur « Couper ici » (⌘B), sélectionne le passage dans la bande puis « Supprimer le passage » (ou Suppr). Les coupes se déplacent à la souris pour réajuster, et un passage supprimé peut être remis (Mac).
+
 ## 2.18
 - Fenêtre de montage à la fin de chaque enregistrement d'écran : lecture, coupe du début et de la fin avec les poignées jaunes, puis Copier, Partager, Finder ou Enregistrer (Mac).
 - La bulle caméra est maintenant enregistrée à part : dans la fenêtre de montage, glisse-la pour la déplacer, change sa taille ou masque-la, même après l'enregistrement (Mac).

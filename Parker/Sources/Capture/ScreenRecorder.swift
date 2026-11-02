@@ -582,10 +582,10 @@ class ScreenRecorder: NSObject {
     /// Camera frame (sample queue): written to the project's camera file on the screen's time line.
     private func handleCameraFrame(_ buffer: CMSampleBuffer, clock: CMClock?) {
         guard isRecording, !cameraWriterFailed, let imageBuffer = buffer.imageBuffer else { return }
-        var pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-        if let clock {
-            pts = CMSyncConvertTime(pts, from: clock, to: CMClockGetHostTimeClock())
-        }
+        // Arrival time on the host clock, the clock of the screen samples. The camera's own
+        // timestamps can use another clock, which put the camera far outside the video.
+        _ = clock
+        let pts = CMClockGetTime(CMClockGetHostTimeClock())
         guard firstSampleTime != nil, let time = remap(pts) else { return }
 
         if cameraWriter == nil {
