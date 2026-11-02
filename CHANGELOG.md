@@ -5,7 +5,7 @@ et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
 ## 2.17
-- Enregistrement d'écran : après avoir choisi la zone, une barre te laisse choisir la caméra (la bulle sert d'aperçu en direct), le micro (une jauge montre qu'il t'entend) et le son du Mac, puis Démarrer (Mac).
+- Enregistrement d'écran : après avoir choisi la zone, une nouvelle barre affiche un gros bouton Démarrer, une tuile Caméra et une tuile Micro avec un interrupteur On/Off. La bulle sert d'aperçu caméra, la tuile Micro se remplit quand il t'entend, et un clic sur une tuile permet de changer d'appareil. Le bouton haut-parleur active ou coupe le son du Mac (Mac).
 - Le micro est enfin enregistré dans la vidéo, mélangé au son du Mac sur une seule piste, lisible partout (Mac, macOS 15 ou plus récent).
 
 ## 2.16
