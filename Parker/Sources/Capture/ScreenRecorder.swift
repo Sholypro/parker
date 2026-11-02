@@ -166,13 +166,17 @@ class ScreenRecorder: NSObject {
         }
         CameraBubble.requestAccess { [weak self] granted in
             guard let self = self, self.setupPanel != nil else { return }
-            guard granted else { self.reportCameraDenied(); return }
-            Defaults.shared.recordWithCamera = true
+            guard granted else {
+                self.setupPanel?.cameraDidFail()
+                self.reportCameraDenied()
+                return
+            }
             if self.cameraBubble.isVisible {
                 self.cameraBubble.switchCamera(to: device)
             } else if self.cameraBubble.show(in: self.recordingArea) {
                 self.bubbleWindowID = self.cameraBubble.windowID
             } else {
+                self.setupPanel?.cameraDidFail()
                 Toast.show(message: "Aucune caméra trouvée", style: .error)
             }
         }
