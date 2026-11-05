@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.20
+- Capture défilante : plus de faux « Trop rapide » sur les pages qui bougent toutes seules (animation, vidéo, carrousel, curseur qui clignote). Ces zones ne bloquent plus le raccord des images.
+- Auto-scroll : si la page ne réagit pas au défilement façon trackpad, Parker essaie le défilement façon molette. Si rien ne bouge, il te le dit et te laisse défiler à la main au lieu d'arrêter la capture (Mac).
+
 ## 2.19
 - Correction : la caméra n'apparaissait pas dans la fenêtre de montage. Elle est de nouveau visible, et les enregistrements faits avec la 2.18 la retrouvent aussi (Mac).
 - Montage : coupe au milieu de la vidéo. Place la tête de lecture, clique sur « Couper ici » (⌘B), sélectionne le passage dans la bande puis « Supprimer le passage » (ou Suppr). Les coupes se déplacent à la souris pour réajuster, et un passage supprimé peut être remis (Mac).

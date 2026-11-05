@@ -33,6 +33,13 @@ final class ScrollStitcher {
     private static let ignoreRight = 2  // overlay scrollbar that appears while scrolling
     private static var usedCols: Int { cols - ignoreLeft - ignoreRight }
     private static let verifyThreshold = 4.0
+    /// A row "matches" below this average difference per column.
+    private static let rowMatchThreshold = 3
+    /// Share of matching rows that validates a position even when part of the view changes on its
+    /// own (animation, video, carousel, blinking cursor): those rows spoil the average.
+    private static let robustMatchFraction = 0.85
+    /// Share of identical rows above which a frame counts as "not scrolled" (only animations moved).
+    private static let staticFraction = 0.6
 
     private var refFrame: CGImage?
     private var refGray: [Int32] = []
@@ -177,21 +184,29 @@ final class ScrollStitcher {
                 for d in Self.candidates(scores, from: 1, to: maxDelta, minScore: minScore, prefer: prefer) {
                     var sum = 0
                     var count = 0
+                    var matched = 0
                     var y = header
                     let end = h - footer - d
                     while y < end {
-                        sum += Self.rowDiff(b, y, a, y + d)
+                        let r = Self.rowDiff(b, y, a, y + d)
+                        sum += r
+                        if r <= Self.rowMatchThreshold * n { matched += 1 }
                         count += 1
                         y += 1
                     }
-                    if Double(sum) / Double(max(count, 1) * n) <= Self.verifyThreshold {
+                    let meanOK = Double(sum) / Double(max(count, 1) * n) <= Self.verifyThreshold
+                    let robustOK = count >= minOverlap && Double(matched) >= Self.robustMatchFraction * Double(count)
+                    if meanOK || robustOK {
                         best = d
                         break
                     }
                 }
             }
         }
-        guard best > 0 else { return .noMatch }
+        guard best > 0 else {
+            // Not scrolled, only something animated in the view: not an error
+            return Self.mostlyStatic(refGray, gray, from: header, to: h - footer) ? .unchanged : .noMatch
+        }
 
         if !started { start(footer: footer) }
         if refTop + best + header > contentBottom { return .noMatch } // would leave a gap
@@ -307,6 +322,21 @@ final class ScrollStitcher {
         // on small scrolls, and letting the footer grow would duplicate those rows.
         if started { footer = min(footer, lastFooter) }
         return (header: header, footer: footer)
+    }
+
+    /// True when most rows are identical at the same place (the page did not move).
+    private static func mostlyStatic(_ ref: [Int32], _ gray: [Int32], from: Int, to: Int) -> Bool {
+        guard to > from else { return false }
+        let n = usedCols
+        var same = 0
+        ref.withUnsafeBufferPointer { a in
+            gray.withUnsafeBufferPointer { b in
+                for y in from..<to where rowDiff(a, y, b, y) <= rowMatchThreshold * n {
+                    same += 1
+                }
+            }
+        }
+        return Double(same) >= staticFraction * Double(to - from)
     }
 
     /// Up to 3 verification candidates: among near-equal scores, closest to `prefer` first

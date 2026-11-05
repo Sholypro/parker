@@ -22,6 +22,10 @@ class ScrollCapture {
     private var isProcessing = false
     private var autoScrolling = false
     private var autoUnchangedCount = 0
+    /// The capture grew at least once since Auto was turned on.
+    private var autoGrew = false
+    /// Some apps ignore pixel (trackpad-like) scrolling: then Auto scrolls by lines, like a mouse wheel.
+    private var autoLineMode = false
     private var autoRecoveries = 0          // consecutive failed steps, each followed by a step back
     private var autoSuccessStreak = 0
     private var autoStepPoints: CGFloat = 0 // current scroll step (adapts to the page)
@@ -232,6 +236,8 @@ class ScrollCapture {
         autoUnchangedCount = 0
         autoRecoveries = 0
         autoSuccessStreak = 0
+        autoGrew = false
+        autoLineMode = false
         // 40 % of the area: leaves enough overlap even under a sticky header
         autoBaseStep = max(autoMinStep, captureRect.height * 0.4)
         autoStepPoints = autoBaseStep
@@ -318,17 +324,30 @@ class ScrollCapture {
 
         waitForSettle(since: Date()) { [weak self] in
             guard let self = self else { return }
-            let expected = Int((CGFloat(amount) * self.pixelScale).rounded())
+            let expected = self.autoLineMode ? nil : Int((CGFloat(amount) * self.pixelScale).rounded())
             self.autoProcess(expectedDelta: expected) { [weak self] result in
                 guard let self = self, self.isCapturing, self.autoScrolling else { return }
                 switch result {
                 case .unchanged:
-                    // The page did not move after a full settle: end of the page
                     self.autoUnchangedCount += 1
-                    if self.autoUnchangedCount >= 2 {
-                        self.finishCapture()
-                    } else {
+                    guard self.autoUnchangedCount >= 2 else {
                         self.autoStep()
+                        return
+                    }
+                    if self.autoGrew {
+                        // The page moved before and now stays still: end of the page
+                        self.finishCapture()
+                    } else if !self.autoLineMode {
+                        // Never moved: this view ignores trackpad-like scrolling, try mouse-wheel lines
+                        self.autoLineMode = true
+                        self.autoUnchangedCount = 0
+                        self.autoStep()
+                    } else {
+                        // Nothing scrolls this view: hand over to the user instead of ending
+                        self.autoScrolling = false
+                        self.hudView?.setAuto(false)
+                        self.hudView?.setStatus("Cette page ne défile pas toute seule : fais défiler à la main, la capture continue", warning: true)
+                        self.processPendingFrames()
                     }
                 case .noMatch:
                     self.autoUnchangedCount = 0
@@ -337,6 +356,7 @@ class ScrollCapture {
                     self.autoUnchangedCount = 0
                     self.autoRecoveries = 0
                     self.autoSuccessStreak += 1
+                    if result.grew { self.autoGrew = true }
                     // After a few clean steps, go back up to the normal speed
                     if self.autoSuccessStreak >= 3, self.autoStepPoints < self.autoBaseStep {
                         self.autoStepPoints = min(self.autoBaseStep, self.autoStepPoints * 1.5)
@@ -412,6 +432,20 @@ class ScrollCapture {
 
     /// Posted where the pointer is (no location set: setting one moved the pointer back to the center).
     private func postScroll(points: Int) {
+        if autoLineMode {
+            // Mouse-wheel notches (about 3 lines each in most apps)
+            let lines = max(1, abs(points) / 40) * (points < 0 ? -1 : 1)
+            guard let event = CGEvent(
+                scrollWheelEvent2Source: nil,
+                units: .line,
+                wheelCount: 1,
+                wheel1: Int32(-lines),
+                wheel2: 0,
+                wheel3: 0
+            ) else { return }
+            event.post(tap: .cghidEventTap)
+            return
+        }
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .pixel,

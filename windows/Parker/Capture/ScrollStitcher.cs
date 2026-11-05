@@ -27,6 +27,13 @@ namespace Parker
         const int Cols = 64, IgnoreLeft = 1, IgnoreRight = 2;
         const int Used = Cols - IgnoreLeft - IgnoreRight;
         const double VerifyThreshold = 4.0;
+        // A row "matches" below this average difference per column.
+        const int RowMatchThreshold = 3;
+        // Share of matching rows that validates a position even when part of the view changes on
+        // its own (animation, video, carousel, blinking cursor): those rows spoil the average.
+        const double RobustMatchFraction = 0.85;
+        // Share of identical rows above which a frame counts as "not scrolled" (only animations moved).
+        const double StaticFraction = 0.6;
 
         Bitmap refFrame;
         int[] refGray;
@@ -138,11 +145,20 @@ namespace Parker
             var best = -1;
             foreach (var d in order)
             {
-                long fs = 0; var fc = 0;
-                for (var y = header; y < h - foot - d; y++) { fs += RowDiff(gray, y, refGray, y + d); fc++; }
-                if ((double)fs / (Math.Max(fc, 1) * Used) <= VerifyThreshold) { best = d; break; }
+                long fs = 0; var fc = 0; var matched = 0;
+                for (var y = header; y < h - foot - d; y++)
+                {
+                    var r = RowDiff(gray, y, refGray, y + d);
+                    fs += r;
+                    if (r <= RowMatchThreshold * Used) matched++;
+                    fc++;
+                }
+                var meanOk = (double)fs / (Math.Max(fc, 1) * Used) <= VerifyThreshold;
+                var robustOk = fc >= minOverlap && matched >= RobustMatchFraction * fc;
+                if (meanOk || robustOk) { best = d; break; }
             }
-            if (best <= 0) return Result.NoMatch;
+            // Not scrolled, only something animated in the view: not an error
+            if (best <= 0) return MostlyStatic(gray, header, h - foot) ? Result.Unchanged : Result.NoMatch;
 
             if (!started) Start(foot);
             if (refTop + best + header > contentBottom) return Result.NoMatch; // would leave a gap
@@ -204,6 +220,16 @@ namespace Parker
         }
 
         // ---------- Helpers ----------
+
+        /// <summary>True when most rows are identical at the same place (the page did not move).</summary>
+        bool MostlyStatic(int[] gray, int from, int to)
+        {
+            if (to <= from) return false;
+            var same = 0;
+            for (var y = from; y < to; y++)
+                if (RowDiff(refGray, y, gray, y) <= RowMatchThreshold * Used) same++;
+            return same >= StaticFraction * (to - from);
+        }
 
         /// <summary>Header/footer detection against the reference. Returns true when the frame is unchanged.</summary>
         bool Bands(int[] gray, int h, out int header, out int foot)
