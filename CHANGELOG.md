@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.21
+- Auto-scroll refait sur le modèle de CleanShot X : la page défile en continu par petits pas réguliers, et les images sont raccordées au fur et à mesure. C'est plus rapide et plus fluide, sans les grands sauts qui faisaient perdre le fil (Mac).
+- La vitesse s'adapte toute seule : l'auto-scroll accélère quand tout se raccorde bien, ralentit et remonte un peu quand une page charge du contenu en route, puis s'arrête de lui-même en bas de la page (Mac).
+
 ## 2.20
 - Capture défilante : plus de faux « Trop rapide » sur les pages qui bougent toutes seules (animation, vidéo, carrousel, curseur qui clignote). Ces zones ne bloquent plus le raccord des images.
 - Auto-scroll : si la page ne réagit pas au défilement façon trackpad, Parker essaie le défilement façon molette. Si rien ne bouge, il te le dit et te laisse défiler à la main au lieu d'arrêter la capture (Mac).
