@@ -47,7 +47,8 @@ final class ScrollStitcher {
     private var contentBottom = 0     // content rows stitched so far (sticky footer excluded)
     private var lastFooter = Int.max
     private var started = false
-    private var slices: [CGImage] = []
+    /// Content pieces, top to bottom, covering rows 0..<contentBottom without gaps.
+    private var slices: [(image: CGImage, top: Int)] = []
     private var footerImage: CGImage?
     private var contentGray: [Int32] = []
     private(set) var lastDelta = 0
@@ -369,29 +370,72 @@ final class ScrollStitcher {
     private func start(footer: Int) {
         guard let ref = refFrame else { return }
         let h = ref.height
-        if let slice = Self.copyRows(ref, from: 0, to: h - footer) { slices.append(slice) }
+        if let slice = Self.cropRows(ref, from: 0, to: h - footer) { slices = [(slice, 0)] }
         contentGray.append(contentsOf: refGray[0..<((h - footer) * Self.cols)])
         contentBottom = h - footer
         refTop = 0
         started = true
     }
 
-    /// Makes `frame` the reference at content row `top`; appends the rows below the content.
+    /// Makes `frame` the reference at content row `top`.
+    ///
+    /// "Last view wins": every content row the frame shows is replaced by this newer view, not
+    /// only the rows it reveals at the bottom. A row's final pixels therefore come from the last
+    /// frame that showed it, when it had scrolled up near the top of the view. Two things this
+    /// fixes (the way CleanShot X behaves):
+    ///  - content that fades or slides in when it enters the view (very common on websites) is
+    ///    captured once it has finished animating, not half transparent at the bottom edge;
+    ///  - floating widgets fixed on screen (chat bubble, badges, "back to top" buttons) are no
+    ///    longer copied into every new strip: they only remain where the last frame shows them.
+    /// Returns true when the content grew.
     private func place(_ frame: CGImage, _ gray: [Int32], top: Int, header: Int, footer: Int) -> Bool {
         let h = frame.height
-        let startRow = max(header, contentBottom - top)
-        let end = h - footer
-        var appended = false
-        if end > startRow, let slice = Self.copyRows(frame, from: startRow, to: end) {
-            slices.append(slice)
-            contentGray.append(contentsOf: gray[(startRow * Self.cols)..<(end * Self.cols)])
-            contentBottom = top + end
+        let from = top + header           // first content row replaced
+        let to = top + h - footer         // end of the rows this frame shows
+        guard to > from, from <= contentBottom,
+              let fresh = Self.cropRows(frame, from: header, to: h - footer) else {
+            adopt(frame, gray, top: top)
+            lastFooter = footer
+            return false
+        }
+        let grew = to > contentBottom
+
+        // Keep what lies outside [from, to); older pieces are copied so the frames they came
+        // from can be released (only the newest piece points into a full frame).
+        var kept: [(image: CGImage, top: Int)] = []
+        var inserted = false
+        for piece in slices {
+            let a = piece.top
+            let b = piece.top + piece.image.height
+            if b <= from || a >= to {
+                if a >= to && !inserted { kept.append((fresh, from)); inserted = true }
+                kept.append(piece)
+                continue
+            }
+            if a < from, let upper = Self.copyRows(piece.image, from: 0, to: from - a) {
+                kept.append((upper, a))
+            }
+            if !inserted { kept.append((fresh, from)); inserted = true }
+            if b > to, let lower = Self.copyRows(piece.image, from: to - a, to: b - a) {
+                kept.append((lower, to))
+            }
+        }
+        if !inserted { kept.append((fresh, from)) }
+        slices = kept
+
+        // Signature of the content, for re-anchoring
+        let cols = Self.cols
+        if to > contentBottom {
+            contentGray.append(contentsOf: [Int32](repeating: 0, count: (to - contentBottom) * cols))
+        }
+        contentGray.replaceSubrange((from * cols)..<(to * cols), with: gray[(header * cols)..<((h - footer) * cols)])
+        contentBottom = max(contentBottom, to)
+        if grew {
             footerImage = footer > 0 ? Self.copyRows(frame, from: h - footer, to: h) : nil
-            appended = true
         }
         adopt(frame, gray, top: top)
         lastFooter = footer
-        return appended
+        return grew
     }
 
     private func adopt(_ frame: CGImage, _ gray: [Int32], top: Int) {
@@ -403,11 +447,14 @@ final class ScrollStitcher {
     /// Builds the stitched image. `maxWidth` produces a downscaled preview.
     func compose(maxWidth: Int? = nil) -> CGImage? {
         guard let ref = refFrame else { return nil }
-        var parts = started ? slices : [ref]
-        if started, let footer = footerImage { parts.append(footer) }
+        var parts: [(image: CGImage, top: Int)] = started ? slices : [(ref, 0)]
+        var totalH = started ? contentBottom : ref.height
+        if started, let footer = footerImage {
+            parts.append((footer, contentBottom))
+            totalH += footer.height
+        }
 
         let width = ref.width
-        let totalH = parts.reduce(0) { $0 + $1.height }
         guard width > 0, totalH > 0 else { return nil }
 
         var scale: CGFloat = 1
@@ -428,12 +475,10 @@ final class ScrollStitcher {
         ctx.interpolationQuality = scale < 1 ? .medium : .none
         ctx.scaleBy(x: scale, y: scale)
 
-        // CoreGraphics origin is bottom-left: draw from the top down
-        var accumulated = 0
+        // CoreGraphics origin is bottom-left
         for part in parts {
-            let y = totalH - accumulated - part.height
-            ctx.draw(part, in: CGRect(x: 0, y: y, width: part.width, height: part.height))
-            accumulated += part.height
+            let y = totalH - part.top - part.image.height
+            ctx.draw(part.image, in: CGRect(x: 0, y: y, width: part.image.width, height: part.image.height))
         }
         return ctx.makeImage()
     }
@@ -475,6 +520,12 @@ final class ScrollStitcher {
 
     /// Copies rows [top, bottom) (top-left origin) into an independent image so the
     /// full source frame can be released.
+    /// Rows of `image` without copying (shares the frame's memory).
+    private static func cropRows(_ image: CGImage, from top: Int, to bottom: Int) -> CGImage? {
+        guard bottom > top else { return nil }
+        return image.cropping(to: CGRect(x: 0, y: top, width: image.width, height: bottom - top))
+    }
+
     private static func copyRows(_ image: CGImage, from top: Int, to bottom: Int) -> CGImage? {
         let height = bottom - top
         guard height > 0,

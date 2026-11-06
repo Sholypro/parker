@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.22
+- Capture défilante : chaque ligne de la page est prise au dernier moment où elle est visible, comme sur CleanShot X. Les éléments qui apparaissent en fondu au défilement sont capturés une fois affichés, au lieu de rester blancs ou transparents (Mac).
+- Les éléments fixes à l'écran (bulle de chat, boutons flottants) ne se répètent plus en bandes tout le long de la capture. Ils n'apparaissent qu'une fois, en bas, comme sur l'écran (Mac).
+
 ## 2.21
 - Auto-scroll refait sur le modèle de CleanShot X : la page défile en continu par petits pas réguliers, et les images sont raccordées au fur et à mesure. C'est plus rapide et plus fluide, sans les grands sauts qui faisaient perdre le fil (Mac).
 - La vitesse s'adapte toute seule : l'auto-scroll accélère quand tout se raccorde bien, ralentit et remonte un peu quand une page charge du contenu en route, puis s'arrête de lui-même en bas de la page (Mac).
