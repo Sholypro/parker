@@ -26,14 +26,11 @@ class ScrollCapture {
     private var autoGrew = false
     /// Some apps ignore pixel (trackpad-like) scrolling: then Auto scrolls by lines, like a mouse wheel.
     private var autoLineMode = false
-    private var autoRecoveries = 0             // step-backs since the capture last grew
-    private var autoTimer: Timer?
-    private var autoSpeed: CGFloat = 0         // points scrolled per tick (adapts to the page)
-    private var autoMaxSpeed: CGFloat = 0
-    private var autoLastGrowth = Date()
-    private var autoHoldUntil = Date.distantPast
-    private var autoLastResult: ScrollStitcher.AddResult?
-    private var processingSince = Date()
+    private var autoStepPoints: CGFloat = 0    // equal step, in points
+    /// Pixels actually scrolled per point asked (page zoom, apps that scroll a bit less):
+    /// learned from the steps the image comparison confirms.
+    private var autoRatio: CGFloat = 1
+    private var autoGeneration = 0             // invalidates a step in flight when Auto stops
     private var lastFrameAt = Date.distantPast // last time the captured area changed (main thread)
     private var autoPausedByMouse = false      // auto-scroll waits for the mouse to come back in the area
     private var mouseWatchTimer: Timer?
@@ -52,15 +49,13 @@ class ScrollCapture {
     private var warningResetWork: DispatchWorkItem?
 
     private let maxOutputHeight = 40_000
-    // Auto-scroll pacing (CleanShot-like): many small scrolls at the rhythm of the frame stream,
-    // frames stitched as they arrive. Small steps always overlap, so nothing is "too fast".
-    private let autoTickInterval: TimeInterval = 1.0 / 30
-    private let autoMinSpeed: CGFloat = 4
-    /// Share of the area height scrolled per tick at full speed (about 1.5 screen per second).
-    private let autoSpeedRatio: CGFloat = 0.05
-    /// No growth for this long: end of the page, or a view that does not scroll.
-    private let autoStallTime: TimeInterval = 1.3
-    private let autoMaxRecoveries = 6
+    // Auto-scroll: equal steps. Scroll a fixed distance, wait until the page is still (smooth
+    // scrolling, fade-in animations), take one frame, place it at the known distance.
+    /// Share of the area scrolled per step: leaves a large overlap to refine the position.
+    private let autoStepRatio: CGFloat = 0.45
+    private let autoMinSettle: TimeInterval = 0.35
+    private let autoIdleTime: TimeInterval = 0.25
+    private let autoMaxSettle: TimeInterval = 1.6
     private let previewInterval: TimeInterval = 0.25
 
     private var pixelScale: CGFloat { source?.pixelScale ?? 2 }
@@ -112,7 +107,6 @@ class ScrollCapture {
         isProcessing = false
         autoScrolling = false
         autoUnchangedCount = 0
-        autoRecoveries = 0
         lastHeight = 0
         recovering = false
 
@@ -141,7 +135,7 @@ class ScrollCapture {
 
     /// Manual mode: stitches every frame received since the last pass.
     private func processPendingFrames() {
-        guard isCapturing, !isProcessing, let source = source else { return }
+        guard isCapturing, !autoScrolling, !isProcessing, let source = source else { return }
         let frames = source.drain()
         guard !frames.isEmpty else { return }
         process(frames, expectedDelta: nil) { [weak self] _ in
@@ -152,7 +146,6 @@ class ScrollCapture {
 
     private func process(_ frames: [CGImage], expectedDelta: Int?, done: ((ScrollStitcher.AddResult) -> Void)?) {
         isProcessing = true
-        processingSince = Date()
         workQueue.async { [weak self] in
             guard let self = self else { return }
             let result = self.stitcher.addBatch(frames, expectedDelta: expectedDelta)
@@ -177,7 +170,6 @@ class ScrollCapture {
 
     private func handle(result: ScrollStitcher.AddResult, height: Int, preview: CGImage?) {
         lastHeight = height
-        if autoScrolling { autoObserve(result) }
         if let preview = preview {
             previewView?.image = preview
         }
@@ -185,8 +177,9 @@ class ScrollCapture {
 
         switch result {
         case .noMatch where !autoScrolling:
+            // No alarm: the capture resumes by itself as soon as the view overlaps what is captured
             recovering = true
-            showWarning("Trop rapide : remonte un peu, la capture reprendra toute seule")
+            hudView?.setStatus("Remonte un peu si la capture n'avance plus", warning: false)
         case .repositioned where !autoScrolling:
             warningResetWork?.cancel()
             recovering = true
@@ -220,17 +213,13 @@ class ScrollCapture {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
     }
 
-    // MARK: - Auto-scroll
+    // MARK: - Auto-scroll (equal steps)
 
     private func toggleAutoScroll() {
         guard isCapturing else { return }
         stopMouseWatch() // the button takes over from the automatic pause
         if autoScrolling {
-            stopAutoTimer()
-            autoScrolling = false
-            hudView?.setAuto(false)
-            hudView?.setStatus("Auto-scroll en pause", warning: false)
-            processPendingFrames()
+            stopAuto(status: "Auto-scroll en pause", warning: false)
             return
         }
 
@@ -243,8 +232,8 @@ class ScrollCapture {
 
         autoGrew = false
         autoLineMode = false
-        autoMaxSpeed = max(autoMinSpeed * 2, captureRect.height * autoSpeedRatio)
-        autoSpeed = autoMaxSpeed / 2 // gentle start, speeds up while it stitches well
+        autoRatio = 1
+        autoStepPoints = max(40, (captureRect.height * autoStepRatio).rounded())
         recovering = false
 
         // Scroll events go to the view under the pointer: when Auto is pressed from the HUD,
@@ -260,102 +249,124 @@ class ScrollCapture {
     private func startAuto() {
         autoScrolling = true
         autoUnchangedCount = 0
-        autoRecoveries = 0
-        autoLastGrowth = Date()
-        autoHoldUntil = Date().addingTimeInterval(0.1)
-        autoLastResult = nil
+        autoGeneration += 1
         hudView?.setAuto(true)
         hudView?.setStatus("Auto-scroll en cours…", warning: false)
-        stopAutoTimer()
-        let timer = Timer(timeInterval: autoTickInterval, repeats: true) { [weak self] _ in
-            self?.autoTick()
+        // Stitch what the user scrolled by hand first, then go
+        let generation = autoGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self, self.autoGeneration == generation else { return }
+            self.autoStep()
         }
-        RunLoop.main.add(timer, forMode: .common)
-        autoTimer = timer
     }
 
-    private func stopAutoTimer() {
-        autoTimer?.invalidate()
-        autoTimer = nil
+    private func stopAuto(status: String, warning: Bool) {
+        autoScrolling = false
+        autoGeneration += 1
+        hudView?.setAuto(false)
+        hudView?.setStatus(status, warning: warning)
+        processPendingFrames()
     }
 
-    /// One tick: a small scroll, unless the stitcher is behind or the page needs a pause.
-    private func autoTick() {
-        guard isCapturing, autoScrolling else { stopAutoTimer(); return }
+    /// One equal step: scroll, wait until still, place the frame.
+    private func autoStep() {
+        guard isCapturing, autoScrolling else { return }
         guard mouseInArea else {
             pauseAutoForMouse()
             return
         }
-        let now = Date()
+        let generation = autoGeneration
+        let points = Int(autoStepPoints)
+        postScroll(points: points)
 
-        // Nothing grew for a while: end of the page, or a view that ignores this kind of scroll
-        if now.timeIntervalSince(autoLastGrowth) >= autoStallTime {
-            handleAutoStall()
-            return
+        waitForSettle(since: Date(), generation: generation) { [weak self] in
+            guard let self = self, self.autoGeneration == generation else { return }
+            // Line mode: the distance per line is unknown, use the step as an estimate
+            let expected = Int((CGFloat(points) * self.pixelScale * self.autoRatio).rounded())
+            self.placeStep(expected: expected, generation: generation)
         }
-        guard now >= autoHoldUntil else { return }
-        // Do not outrun the stitcher: frames would pile up and drift apart
-        if isProcessing && now.timeIntervalSince(processingSince) > 0.12 { return }
-
-        postScroll(points: max(1, Int(autoSpeed.rounded())))
     }
 
-    /// Stitching result while Auto runs: adapts the speed.
-    private func autoObserve(_ result: ScrollStitcher.AddResult) {
-        autoLastResult = result
+    private func placeStep(expected: Int, generation: Int) {
+        guard isCapturing, let source = source else { return }
+        if isProcessing {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.placeStep(expected: expected, generation: generation)
+            }
+            return
+        }
+        // Only the still frame counts: frames from the middle of the scroll are dropped
+        _ = source.drain()
+        guard let frame = source.latestFrame else {
+            autoStep()
+            return
+        }
+        isProcessing = true
+        workQueue.async { [weak self] in
+            guard let self = self else { return }
+            let (result, measured) = self.stitcher.addStep(frame, expectedDelta: expected)
+            let height = self.stitcher.totalHeight
+            var preview: CGImage?
+            if result.grew, Date().timeIntervalSince(self.lastPreviewTime) >= self.previewInterval {
+                preview = self.stitcher.compose(maxWidth: 340)
+                self.lastPreviewTime = Date()
+            }
+            DispatchQueue.main.async {
+                self.isProcessing = false
+                guard self.isCapturing else { return }
+                self.handle(result: result, height: height, preview: preview)
+                guard self.autoScrolling, self.autoGeneration == generation else { return }
+                self.afterStep(result, measured: measured, expected: expected)
+            }
+        }
+    }
+
+    private func afterStep(_ result: ScrollStitcher.AddResult, measured: Int?, expected: Int) {
         switch result {
-        case .first, .appended:
-            if result.grew {
-                autoGrew = true
-                autoLastGrowth = Date()
-                autoRecoveries = 0
-                autoUnchangedCount = 0
-                autoSpeed = min(autoMaxSpeed, autoSpeed * 1.06)
-            }
-        case .noMatch:
-            // Lost track (page jumped, lazy loading): slow down, step back so the view overlaps
-            // what is already captured (the stitcher re-anchors on it), then go on.
-            autoRecoveries += 1
-            guard autoRecoveries <= autoMaxRecoveries else {
-                stopAuto(message: "Auto-scroll arrêté : contenu impossible à raccorder. Continue à la main.")
-                return
-            }
-            autoSpeed = max(autoMinSpeed, autoSpeed * 0.5)
-            postScroll(points: -Int(captureRect.height * 0.3))
-            autoHoldUntil = Date().addingTimeInterval(0.35)
-            autoLastGrowth = Date() // give the recovery time before calling it a stall
         case .unchanged:
             autoUnchangedCount += 1
-        case .repositioned:
-            break
+            guard autoUnchangedCount >= 2 else {
+                autoStep()
+                return
+            }
+            if autoGrew {
+                // The page moved before and now stays still: end of the page
+                finishCapture()
+            } else if !autoLineMode {
+                // Never moved: this view ignores trackpad-like scrolling, try mouse-wheel lines
+                autoLineMode = true
+                autoUnchangedCount = 0
+                autoStep()
+            } else {
+                stopAuto(status: "Cette page ne défile pas toute seule : fais défiler à la main, la capture continue", warning: true)
+            }
+        default:
+            autoUnchangedCount = 0
+            if result.grew { autoGrew = true }
+            // Learn how far one step really goes (only from confirmed, full-length steps)
+            if let measured, measured > 0, expected > 0, !autoLineMode {
+                let ratio = CGFloat(measured) / CGFloat(expected) * autoRatio
+                if ratio > 0.5 && ratio < 1.5 && CGFloat(measured) > CGFloat(expected) * 0.8 {
+                    autoRatio = autoRatio * 0.5 + ratio * 0.5
+                }
+            }
+            autoStep()
         }
     }
 
-    private func handleAutoStall() {
-        // Still losing track: that is not the end of the page
-        if case .noMatch = autoLastResult {
-            autoLastGrowth = Date()
-            return
+    /// Calls `then` once the captured area has stopped changing (or after `autoMaxSettle`).
+    private func waitForSettle(since start: Date, generation: Int, then: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self = self, self.isCapturing, self.autoScrolling, self.autoGeneration == generation else { return }
+            let now = Date()
+            let elapsed = now.timeIntervalSince(start)
+            let idle = now.timeIntervalSince(self.lastFrameAt)
+            if (elapsed >= self.autoMinSettle && idle >= self.autoIdleTime) || elapsed >= self.autoMaxSettle {
+                then()
+            } else {
+                self.waitForSettle(since: start, generation: generation, then: then)
+            }
         }
-        if autoGrew {
-            // The page moved before and now stays still: end of the page
-            stopAutoTimer()
-            finishCapture()
-        } else if !autoLineMode {
-            // Never moved: this view ignores trackpad-like scrolling, try mouse-wheel lines
-            autoLineMode = true
-            autoLastGrowth = Date()
-        } else {
-            stopAuto(message: "Cette page ne défile pas toute seule : fais défiler à la main, la capture continue")
-        }
-    }
-
-    private func stopAuto(message: String) {
-        stopAutoTimer()
-        autoScrolling = false
-        hudView?.setAuto(false)
-        hudView?.setStatus(message, warning: true)
-        processPendingFrames()
     }
 
     // MARK: - Pause when the mouse leaves the area
@@ -368,8 +379,8 @@ class ScrollCapture {
     /// and resume by itself as soon as it comes back.
     private func pauseAutoForMouse() {
         guard autoScrolling else { return }
-        stopAutoTimer()
         autoScrolling = false
+        autoGeneration += 1
         autoPausedByMouse = true
         hudView?.setAuto(false)
         hudView?.setStatus("Auto-scroll en pause : remets la souris dans la zone pour reprendre", warning: false)
@@ -400,7 +411,7 @@ class ScrollCapture {
     private func postScroll(points: Int) {
         if autoLineMode {
             // Mouse-wheel notches (about 3 lines each in most apps)
-            let lines = max(1, abs(points) / 12) * (points < 0 ? -1 : 1)
+            let lines = max(1, abs(points) / 40) * (points < 0 ? -1 : 1)
             guard let event = CGEvent(
                 scrollWheelEvent2Source: nil,
                 units: .line,
@@ -430,7 +441,7 @@ class ScrollCapture {
         guard isCapturing else { return }
         isCapturing = false
         autoScrolling = false
-        stopAutoTimer()
+        autoGeneration += 1
         let source = self.source
         self.source = nil
         source?.stop()
@@ -472,7 +483,7 @@ class ScrollCapture {
         guard isCapturing else { return }
         isCapturing = false
         autoScrolling = false
-        stopAutoTimer()
+        autoGeneration += 1
         source?.stop()
         source = nil
         teardownUI()

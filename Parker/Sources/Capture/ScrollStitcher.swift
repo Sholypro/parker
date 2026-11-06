@@ -132,6 +132,103 @@ final class ScrollStitcher {
         return result
     }
 
+    // MARK: - Equal steps (auto-scroll)
+
+    /// Auto-scroll frame taken after a scroll of a known size (`expectedDelta` pixels).
+    /// The image comparison only refines the position near the expected one: when it cannot
+    /// confirm it (parallax, animations, video), the frame is placed at the expected distance
+    /// anyway, so the capture never stops on "no match".
+    /// Returns `.unchanged` when the page did not move (end of the page).
+    /// `measured` gives the delta actually used (to calibrate the next steps).
+    func addStep(_ frame: CGImage, expectedDelta: Int) -> (result: AddResult, measured: Int?) {
+        guard let gray = Self.grayRows(frame) else { return (.noMatch, nil) }
+        guard let ref = refFrame else {
+            adopt(frame, gray, top: 0)
+            return (.first, nil)
+        }
+        guard frame.width == ref.width, frame.height == ref.height else { return (.noMatch, nil) }
+
+        let h = frame.height
+        let n = Self.usedCols
+        guard let hf = bands(gray, h) else { return (.unchanged, 0) }
+        let header = hf.header, footer = hf.footer
+        let band = h - header - footer
+        guard band >= 40 else { return (.unchanged, 0) }
+        if Self.mostlyStatic(refGray, gray, from: header, to: h - footer) {
+            return (.unchanged, 0) // only something animated moved: the page itself did not scroll
+        }
+
+        let minOverlap = max(12, band / 10)
+        let maxDelta = band - minOverlap
+        guard maxDelta >= 1 else { return (.unchanged, 0) }
+        let expected = min(max(1, expectedDelta), maxDelta)
+
+        // Search up to a bit beyond the expected step (the last step is shorter at the end of the page)
+        let hi = min(maxDelta, Int(Double(expected) * 1.3) + 2)
+        var bestD = -1
+        var bestScore = Double.infinity
+        var scores = [Double](repeating: .infinity, count: hi + 1)
+        refGray.withUnsafeBufferPointer { a in
+            gray.withUnsafeBufferPointer { b in
+                for d in 1...hi {
+                    var sum = 0
+                    var count = 0
+                    var y = header
+                    let end = h - footer - d
+                    while y < end {
+                        sum += Self.rowDiff(b, y, a, y + d)
+                        count += 1
+                        y += 2
+                    }
+                    if count > 0 {
+                        scores[d] = Double(sum) / Double(count * n)
+                        if scores[d] < bestScore { bestScore = scores[d]; bestD = d }
+                    }
+                }
+            }
+        }
+
+        // Verify the best candidates (closest to the expected step first among near-equal scores)
+        var chosen = -1
+        if bestD > 0 {
+            refGray.withUnsafeBufferPointer { a in
+                gray.withUnsafeBufferPointer { b in
+                    for d in Self.candidates(scores, from: 1, to: hi, minScore: bestScore, prefer: expected) {
+                        var sum = 0
+                        var count = 0
+                        var matched = 0
+                        var y = header
+                        let end = h - footer - d
+                        while y < end {
+                            let r = Self.rowDiff(b, y, a, y + d)
+                            sum += r
+                            if r <= Self.rowMatchThreshold * n { matched += 1 }
+                            count += 1
+                            y += 1
+                        }
+                        let meanOK = Double(sum) / Double(max(count, 1) * n) <= Self.verifyThreshold
+                        let robustOK = count >= minOverlap && Double(matched) >= 0.7 * Double(count)
+                        if meanOK || robustOK {
+                            chosen = d
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        let confirmed = chosen > 0
+        let delta = confirmed ? chosen : expected
+
+        if !started { start(footer: footer) }
+        // Never leave a gap: at most what keeps the frame touching the stitched content
+        let maxTop = contentBottom - header
+        let previousTop = refTop
+        let top = min(previousTop + delta, maxTop)
+        let grew = place(frame, gray, top: top, header: header, footer: footer)
+        lastDelta = max(0, top - previousTop)
+        return (grew ? .appended(delta) : .repositioned, confirmed ? chosen : nil)
+    }
+
     // MARK: - Matching against the reference frame
 
     private func match(_ frame: CGImage, _ gray: [Int32], _ expectedDelta: Int?) -> AddResult {

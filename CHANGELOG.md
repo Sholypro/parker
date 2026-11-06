@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.23
+- Auto-scroll à pas égaux : la page défile d'une distance fixe, Parker attend qu'elle soit immobile (défilement fluide, fondus), prend une image et la place à la distance connue. La comparaison d'images ne sert plus qu'à affiner la position, elle ne peut plus bloquer la capture (Mac).
+- Plus d'alerte « Trop rapide » : les pages avec parallaxe, animations ou vidéo dans le hero ne coupent plus la capture (Mac).
+
 ## 2.22
 - Capture défilante : chaque ligne de la page est prise au dernier moment où elle est visible, comme sur CleanShot X. Les éléments qui apparaissent en fondu au défilement sont capturés une fois affichés, au lieu de rester blancs ou transparents (Mac).
 - Les éléments fixes à l'écran (bulle de chat, boutons flottants) ne se répètent plus en bandes tout le long de la capture. Ils n'apparaissent qu'une fois, en bas, comme sur l'écran (Mac).
