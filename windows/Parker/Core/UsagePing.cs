@@ -3,7 +3,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace Parker.Core
+namespace Parker
 {
     /// <summary>
     /// Anonymous usage count, with no server of our own. Once a day, Parker downloads a tiny
