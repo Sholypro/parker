@@ -5,7 +5,7 @@ et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
 ## 2.24
-- Les menus déroulants, pop-ups, popovers et infobulles restent ouverts pendant la capture : Parker n'activait plus l'app en cours, ce qui fermait tout. Les captures de zone, de fenêtre, de défilement et la pipette les gardent à l'écran (Mac).
+- Les menus déroulants, pop-ups, popovers et infobulles restent ouverts pendant la capture : avant, Parker passait au premier plan au moment de la capture, et macOS fermait alors tout. Les captures de zone, de fenêtre, de défilement et la pipette les gardent à l'écran (Mac).
 - Capture de fenêtre : le menu ou le pop-up ouvert au-dessus de la fenêtre est capturé avec elle (Mac).
 
 ## 2.23
