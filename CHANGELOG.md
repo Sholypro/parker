@@ -4,6 +4,9 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.25
+- Statistiques anonymes : une fois par jour, Parker télécharge un fichier texte vide de la dernière release, compté par GitHub. Rien n'est envoyé, aucun identifiant, aucune capture. Option « Partager des statistiques anonymes » dans les réglages pour le désactiver.
+
 ## 2.24
 - Les menus déroulants, pop-ups, popovers et infobulles restent ouverts pendant la capture : avant, Parker passait au premier plan au moment de la capture, et macOS fermait alors tout. Les captures de zone, de fenêtre, de défilement et la pipette les gardent à l'écran (Mac).
 - Capture de fenêtre : le menu ou le pop-up ouvert au-dessus de la fenêtre est capturé avec elle (Mac).

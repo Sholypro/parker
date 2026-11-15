@@ -123,3 +123,11 @@ Capture plein écran / zone / fenêtre, retardateur, masquage des icônes du bur
 
 ## Crédits et licence
 Base : [8tp/ScreenCap](https://github.com/8tp/ScreenCap), licence MIT (voir `LICENSE`). Modifications : capture défilante, vignettes, éditeur, localisation française, script de build.
+
+## Statistiques anonymes
+
+Une fois par jour, Parker télécharge un fichier texte vide attaché à la dernière release
+(`stats-mac.txt` ou `stats-windows.txt`). GitHub compte les téléchargements de chaque fichier :
+ce compteur donne le nombre d'installations actives par jour et par système. Rien n'est envoyé,
+aucun identifiant, aucune capture. L'option « Partager des statistiques anonymes » dans les
+réglages le désactive.

@@ -134,6 +134,12 @@ class Defaults {
         set { store.set(newValue, forKey: "recordWithCamera") }
     }
 
+    /// Daily anonymous launch count through GitHub's download counters (see UsagePing).
+    var shareAnonymousStats: Bool {
+        get { store.object(forKey: "shareAnonymousStats") as? Bool ?? true }
+        set { store.set(newValue, forKey: "shareAnonymousStats") }
+    }
+
     /// Camera used for the webcam bubble (nil: system default).
     var cameraID: String? {
         get { store.string(forKey: "cameraID") }

@@ -33,6 +33,9 @@ namespace Parker
         public bool LaunchAtStartup = true;
         public string SkippedVersion = "";
         public DateTime LastUpdateCheck = DateTime.MinValue;
+        // Daily anonymous launch count through GitHub's download counters (see UsagePing)
+        public bool ShareAnonymousStats = true;
+        public string LastUsagePingDay = "";
         public List<string> Recent = new List<string>();
         public bool FirstRunDone = false;
 
@@ -84,6 +87,8 @@ namespace Parker
                         case "PlaySound": s.PlaySound = val == "1"; break;
                         case "LaunchAtStartup": s.LaunchAtStartup = val == "1"; break;
                         case "SkippedVersion": s.SkippedVersion = val; break;
+                        case "ShareAnonymousStats": s.ShareAnonymousStats = val != "0"; break;
+                        case "LastUsagePingDay": s.LastUsagePingDay = val; break;
                         case "LastUpdateCheck":
                             long ticks;
                             if (long.TryParse(val, out ticks)) s.LastUpdateCheck = new DateTime(ticks, DateTimeKind.Utc);
@@ -121,6 +126,8 @@ namespace Parker
                     "LaunchAtStartup=" + (LaunchAtStartup ? 1 : 0),
                     "SkippedVersion=" + SkippedVersion,
                     "LastUpdateCheck=" + LastUpdateCheck.Ticks,
+                    "ShareAnonymousStats=" + (ShareAnonymousStats ? 1 : 0),
+                    "LastUsagePingDay=" + LastUsagePingDay,
                     "Recent=" + string.Join("|", Recent.Take(20)),
                     "FirstRunDone=" + (FirstRunDone ? 1 : 0),
                 };

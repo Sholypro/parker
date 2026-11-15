@@ -133,6 +133,7 @@ namespace Parker
             }
 
             Updater.CheckInBackgroundIfNeeded();
+            UsagePing.Start();
         }
 
         string ShortcutFor(string name)

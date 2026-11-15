@@ -113,6 +113,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Look for a newer version on GitHub (silent, at most every 6 h)
         UpdateChecker.shared.checkInBackgroundIfNeeded()
+        UsagePing.start()
     }
 
     private func setupCaptureToolbar() {

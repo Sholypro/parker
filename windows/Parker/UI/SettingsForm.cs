@@ -19,6 +19,7 @@ namespace Parker
         readonly CheckBox autoHide = new CheckBox { Text = "Masquer automatiquement les vignettes", AutoSize = true };
         readonly CheckBox sound = new CheckBox { Text = "Son de capture", AutoSize = true };
         readonly CheckBox startup = new CheckBox { Text = "Lancer Parker au démarrage de Windows", AutoSize = true };
+        readonly CheckBox stats = new CheckBox { Text = "Partager des statistiques anonymes (un simple « lancé aujourd'hui », compté par GitHub)", AutoSize = true };
 
         public SettingsForm(string hotkeysText)
         {
@@ -37,6 +38,7 @@ namespace Parker
             var s = Settings.Current;
             folder.Text = s.SaveFolder;
             saveToFolder.Checked = s.SaveToFolder;
+            stats.Checked = s.ShareAnonymousStats;
             format.Items.AddRange(new object[] { "PNG", "JPEG" });
             format.SelectedIndex = s.ImageFormat == "jpg" ? 1 : 0;
             copy.Checked = s.CopyToClipboard;
@@ -88,6 +90,7 @@ namespace Parker
             row("", autoHide);
             row("Masquer après (s)", seconds);
             row("", startup);
+            row("", stats);
             row("Raccourcis", new Label { Text = hotkeysText, AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, 8, 0, 4) });
 
             var ok = new Button { Text = "Enregistrer", AutoSize = true, DialogResult = DialogResult.OK };
@@ -110,6 +113,7 @@ namespace Parker
             var s = Settings.Current;
             if (!string.IsNullOrWhiteSpace(folder.Text)) s.SaveFolder = folder.Text.Trim();
             s.SaveToFolder = saveToFolder.Checked;
+            s.ShareAnonymousStats = stats.Checked;
             s.ImageFormat = format.SelectedIndex == 1 ? "jpg" : "png";
             s.CopyToClipboard = copy.Checked;
             s.ShowThumbnail = thumb.Checked;

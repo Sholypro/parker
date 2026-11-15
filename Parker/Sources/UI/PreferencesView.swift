@@ -287,6 +287,7 @@ struct GeneralSettingsPage: View {
     @AppStorage("thumbnailPosition") private var thumbnailPosition: String = "bottomLeft"
     @AppStorage("thumbnailAutoHide") private var thumbnailAutoHide: Bool = false
     @AppStorage("thumbnailDuration") private var thumbnailDuration: Double = 5.0
+    @AppStorage("shareAnonymousStats") private var shareAnonymousStats: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -337,6 +338,11 @@ struct GeneralSettingsPage: View {
                 SettingsDivider()
                 SettingsRow(title: "Jouer un son") {
                     SettingsSwitch(isOn: $playSound)
+                }
+                SettingsDivider()
+                SettingsRow(title: "Partager des statistiques anonymes",
+                            subtitle: "Un simple « Parker a été lancé aujourd’hui », compté par GitHub. Aucune donnée personnelle.") {
+                    SettingsSwitch(isOn: $shareAnonymousStats)
                 }
             }
 

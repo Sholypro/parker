@@ -199,6 +199,14 @@ jobs:
           } > release-notes.md
           cat release-notes.md
 
+      - name: Fichiers de statistiques anonymes
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          # Chaque app installée télécharge le fichier de son système une fois par jour.
+          # GitHub compte ces téléchargements : c'est le nombre d'installations actives par jour.
+          for os in mac windows; do
+            printf 'Fichier de statistiques anonymes de Parker : chaque app le telecharge une fois par jour, GitHub compte les telechargements. Rien a installer ici.\n' > "stats-$os.txt"
+          done
       - name: Publier la release
         if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
@@ -210,6 +218,8 @@ jobs:
           files: |
             Parker-Mac-Installer.dmg
             Parker-Mac.zip
+            stats-mac.txt
+            stats-windows.txt
 
   windows:
     needs: build
@@ -285,3 +295,5 @@ jobs:
           label Parker-Windows-Installer.exe "Parker-Windows-Installer.exe (installer Parker sur Windows)"
           label Parker-Mac.zip               "Parker-Mac.zip (mise à jour automatique, pas à télécharger)"
           label Parker-Windows.zip           "Parker-Windows.zip (mise à jour automatique, pas à télécharger)"
+          label stats-mac.txt                "stats-mac.txt (compteur anonyme d'utilisation Mac, pas à télécharger)"
+          label stats-windows.txt            "stats-windows.txt (compteur anonyme d'utilisation Windows, pas à télécharger)"
