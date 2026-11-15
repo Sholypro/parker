@@ -62,10 +62,16 @@ enum ScreenGrabber {
     }
 
     /// Captures a single window, even if partly covered by other windows.
+    /// Its open menus, pop-ups, popovers and tooltips (the same app's windows above the normal
+    /// layer that touch it) are captured with it, as they appear on screen.
     static func capture(windowID: CGWindowID, includeShadow: Bool) -> CGImage? {
         run { content in
             guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
                 throw Failure.captureFailed
+            }
+            let popups = popupWindows(of: window, in: content)
+            if !popups.isEmpty, let image = try await captureWithPopups(window, popups, includeShadow: includeShadow, content: content) {
+                return image
             }
             let filter = SCContentFilter(desktopIndependentWindow: window)
             let scale = CGFloat(filter.pointPixelScale)
@@ -82,6 +88,44 @@ enum ScreenGrabber {
             }
             return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         }
+    }
+
+    /// On-screen windows of the same app, above the normal layer (menus are at 101, popovers
+    /// and tooltips a bit above 0), that overlap `window` or sit right next to it.
+    private static func popupWindows(of window: SCWindow, in content: SCShareableContent) -> [SCWindow] {
+        guard let pid = window.owningApplication?.processID else { return [] }
+        let near = window.frame.insetBy(dx: -4, dy: -4)
+        return content.windows.filter { other in
+            other.windowID != window.windowID
+                && other.isOnScreen
+                && other.owningApplication?.processID == pid
+                && other.windowLayer > 0
+                && other.frame.width >= 8 && other.frame.height >= 8
+                && other.frame.intersects(near)
+        }
+    }
+
+    /// Window + its pop-ups, cropped to what they cover together (one display only).
+    private static func captureWithPopups(_ window: SCWindow, _ popups: [SCWindow], includeShadow: Bool,
+                                          content: SCShareableContent) async throws -> CGImage? {
+        var rect = window.frame
+        for popup in popups { rect = rect.union(popup.frame) }
+        if includeShadow { rect = rect.insetBy(dx: -40, dy: -40) }
+        guard let display = content.displays.first(where: { $0.frame.contains(CGPoint(x: window.frame.midX, y: window.frame.midY)) })
+                ?? content.displays.first(where: { $0.frame.intersects(rect) }) else { return nil }
+        rect = rect.intersection(display.frame)
+        guard rect.width >= 1, rect.height >= 1 else { return nil }
+
+        let filter = SCContentFilter(display: display, including: [window] + popups)
+        let scale = CGFloat(filter.pointPixelScale)
+        let config = baseConfiguration()
+        config.sourceRect = CGRect(x: rect.minX - display.frame.minX, y: rect.minY - display.frame.minY,
+                                   width: rect.width, height: rect.height)
+        config.width = max(1, Int((rect.width * scale).rounded()))
+        config.height = max(1, Int((rect.height * scale).rounded()))
+        config.ignoreShadowsDisplay = !includeShadow
+        config.shouldBeOpaque = false
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
     }
 
     // MARK: - Snapshot (for live loupes: capture once, then crop for free)

@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.24
+- Les menus déroulants, pop-ups, popovers et infobulles restent ouverts pendant la capture : Parker n'activait plus l'app en cours, ce qui fermait tout. Les captures de zone, de fenêtre, de défilement et la pipette les gardent à l'écran (Mac).
+- Capture de fenêtre : le menu ou le pop-up ouvert au-dessus de la fenêtre est capturé avec elle (Mac).
+
 ## 2.23
 - Auto-scroll à pas égaux : la page défile d'une distance fixe, Parker attend qu'elle soit immobile (défilement fluide, fondus), prend une image et la place à la distance connue. La comparaison d'images ne sert plus qu'à affiner la position, elle ne peut plus bloquer la capture (Mac).
 - Plus d'alerte « Trop rapide » : les pages avec parallaxe, animations ou vidéo dans le hero ne coupent plus la capture (Mac).

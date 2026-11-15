@@ -34,14 +34,20 @@ enum SpaceSafeFocus {
         }
     }
 
-    /// Shows a capture overlay on the current desktop and gives it the keyboard.
-    /// The window is put on screen *before* Parker is activated: macOS then has a Parker window
-    /// on this desktop and does not jump to the desktop of another Parker window (settings…).
+    /// Shows a window on the current desktop and gives it the keyboard.
+    ///
+    /// A non-activating panel (the capture overlays) gets the keyboard *without* activating
+    /// Parker: the app in front stays active, so its open menus, pop-ups and popovers stay on
+    /// screen and end up in the capture. Any other window needs Parker active; it is put on
+    /// screen *before* activating, so macOS has a Parker window on this desktop and does not
+    /// jump to the desktop of another Parker window (settings…).
     static func present(_ window: NSWindow, firstResponder: NSResponder?) {
         window.collectionBehavior.insert(.canJoinAllSpaces)
         window.collectionBehavior.insert(.fullScreenAuxiliary)
         window.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
+        if !window.styleMask.contains(.nonactivatingPanel) {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         window.makeKey()
         if let firstResponder { window.makeFirstResponder(firstResponder) }
     }
