@@ -66,7 +66,10 @@ class ScreenRecorder: NSObject {
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = displayForMouseLocation(content.displays) else {
+                // The screen chosen last time (still connected), otherwise the one under the mouse
+                let saved = Defaults.shared.recordDisplayID
+                guard let display = content.displays.first(where: { saved != nil && $0.displayID == saved })
+                        ?? displayForMouseLocation(content.displays) else {
                     throw CaptureError.noDisplay
                 }
                 _ = await prepareCamera(display: display, cropRect: nil)
@@ -135,8 +138,12 @@ class ScreenRecorder: NSObject {
                 do {
                     // The bubble may have been turned on or off in the bar: read the windows again
                     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                    let filter = self.makeFilter(display: display, content: content)
-                    try await self.startRecording(filter: filter, display: display, cropRect: cropRect)
+                    // Full screen: the screen may have been changed in the bar
+                    let chosen = cropRect == nil ? (self.recordingDisplay.flatMap { current in
+                        content.displays.first { $0.displayID == current.displayID }
+                    } ?? display) : display
+                    let filter = self.makeFilter(display: chosen, content: content)
+                    try await self.startRecording(filter: filter, display: chosen, cropRect: cropRect)
                 } catch {
                     NSLog("Recording failed: \(error)")
                     await self.handleStartFailure()
@@ -148,6 +155,16 @@ class ScreenRecorder: NSObject {
         panel.onStart = { [weak self] in self?.readyStartClicked() }
         panel.onCancel = { [weak self] in self?.readyCancelClicked() }
         panel.onCameraChange = { [weak self] device in self?.setupCameraChanged(device) }
+        if cropRect == nil {
+            let key = NSDeviceDescriptionKey("NSScreenNumber")
+            panel.screens = NSScreen.screens.compactMap { screen in
+                guard let id = screen.deviceDescription[key] as? CGDirectDisplayID else { return nil }
+                let size = screen.frame.size
+                return (id, "\(screen.localizedName)  (\(Int(size.width)) × \(Int(size.height)))")
+            }
+            panel.selectedScreen = display.displayID
+            panel.onScreenChange = { [weak self] id in self?.setupScreenChanged(id) }
+        }
         panel.show(near: recordingArea)
         setupPanel = panel
 
@@ -185,6 +202,28 @@ class ScreenRecorder: NSObject {
             } else {
                 self.setupPanel?.cameraDidFail()
                 Toast.show(message: "Aucune caméra trouvée", style: .error)
+            }
+        }
+    }
+
+    /// Another screen chosen in the bar (full screen): the bar and the camera bubble move to it.
+    private func setupScreenChanged(_ id: CGDirectDisplayID) {
+        Defaults.shared.recordDisplayID = id
+        Task {
+            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+                  let display = content.displays.first(where: { $0.displayID == id }) else { return }
+            await MainActor.run {
+                guard self.setupPanel != nil else { return }
+                self.recordingDisplay = display
+                self.recordingArea = self.cocoaArea(display: display, cropRect: nil)
+                self.setupPanel?.move(near: self.recordingArea)
+                if self.cameraBubble.isVisible {
+                    self.cameraBubble.hide()
+                    self.cameraBubble.resetLastFrame()
+                    if self.cameraBubble.show(in: self.recordingArea) {
+                        self.bubbleWindowID = self.cameraBubble.windowID
+                    }
+                }
             }
         }
     }

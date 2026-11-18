@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 class Defaults {
     static let shared = Defaults()
@@ -156,6 +157,12 @@ class Defaults {
     var microphoneID: String? {
         get { store.string(forKey: "microphoneID") }
         set { store.set(newValue, forKey: "microphoneID") }
+    }
+
+    /// Screen recorded in full-screen mode (nil: the one under the mouse).
+    var recordDisplayID: CGDirectDisplayID? {
+        get { (store.object(forKey: "recordDisplayID") as? NSNumber).map { CGDirectDisplayID($0.uint32Value) } }
+        set { store.set(newValue.map { NSNumber(value: $0) }, forKey: "recordDisplayID") }
     }
 
     /// Records the sound played by the Mac (on by default).

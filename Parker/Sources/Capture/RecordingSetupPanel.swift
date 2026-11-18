@@ -14,7 +14,6 @@ final class RecordingSetupPanel: NSObject {
     private var panel: NSPanel?
     private var cameraTile: DeviceTile?
     private var micTile: DeviceTile?
-    private var soundButton: RoundIconButton?
     private let micMonitor = MicLevelMonitor()
 
     static var microphoneSupported: Bool {
@@ -22,12 +21,20 @@ final class RecordingSetupPanel: NSObject {
         return false
     }
 
-    private static let width: CGFloat = 520
+    private static let width: CGFloat = 640
     private static let cardHeight: CGFloat = 76
     private static let gap: CGFloat = 10
 
-    /// `area`: what will be recorded, in Cocoa coordinates. The bar sits just below it.
-    func show(near area: NSRect) {
+    /// Screens offered in full-screen mode (nil or one screen: no screen button).
+    var screens: [(id: CGDirectDisplayID, name: String)] = []
+    var selectedScreen: CGDirectDisplayID?
+    var onScreenChange: ((CGDirectDisplayID) -> Void)?
+
+    private var soundTile: DeviceTile?
+    private var screenButton: RoundIconButton?
+
+    /// Panel frame for an area (Cocoa coordinates): just below it, or inside it at the bottom.
+    private static func frame(near area: NSRect) -> NSRect {
         let width = Self.width
         let height = Self.cardHeight * 2 + Self.gap
         let center = NSPoint(x: area.midX, y: area.midY)
@@ -43,9 +50,34 @@ final class RecordingSetupPanel: NSObject {
         }
         var x = area.midX - width / 2
         x = min(max(x, visible.minX + 8), visible.maxX - width - 8)
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Slides the bar to another area (another screen was chosen).
+    func move(near area: NSRect) {
+        guard let panel else { return }
+        let target = Self.frame(near: area)
+        // Across screens an animated slide would cross the gap: fade out, jump, fade in
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.12
+            panel.animator().alphaValue = 0
+        }, completionHandler: {
+            panel.setFrame(target, display: true)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                panel.animator().alphaValue = 1
+            }
+        })
+    }
+
+    /// `area`: what will be recorded, in Cocoa coordinates. The bar sits just below it.
+    func show(near area: NSRect) {
+        let frame = Self.frame(near: area)
+        let width = frame.width
+        let height = frame.height
 
         let panel = SetupPanel(
-            contentRect: NSRect(x: x, y: y, width: width, height: height),
+            contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -61,7 +93,7 @@ final class RecordingSetupPanel: NSObject {
 
         let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
-        // Top card: close, Start, Mac sound
+        // Top card: close, Start, screen picker (full screen with several screens)
         let top = Self.card(frame: NSRect(x: 0, y: Self.cardHeight + Self.gap, width: width, height: Self.cardHeight))
         root.addSubview(top)
 
@@ -70,20 +102,23 @@ final class RecordingSetupPanel: NSObject {
         close.onClick = { [weak self] in self?.onCancel?() }
         top.addSubview(close)
 
-        let start = StartButton(frame: NSRect(x: 74, y: 12, width: width - 148, height: 52))
+        let pickScreen = screens.count > 1
+        let start = StartButton(frame: NSRect(x: 74, y: 12, width: width - (pickScreen ? 148 : 88), height: 52))
         start.onClick = { [weak self] in self?.onStart?() }
         top.addSubview(start)
 
-        let sound = RoundIconButton(frame: NSRect(x: width - 62, y: 14, width: 48, height: 48), symbol: "speaker.wave.2.fill", light: false)
-        sound.onClick = { [weak self] in self?.toggleSystemAudio() }
-        top.addSubview(sound)
-        soundButton = sound
-        updateSoundButton()
+        if pickScreen {
+            let screen = RoundIconButton(frame: NSRect(x: width - 62, y: 14, width: 48, height: 48), symbol: "display.2", light: false)
+            screen.toolTip = "Choisir l’écran à enregistrer"
+            screen.onClick = { [weak self] in self?.showScreenMenu() }
+            top.addSubview(screen)
+            screenButton = screen
+        }
 
-        // Bottom card: camera and microphone tiles
+        // Bottom card: camera, microphone and computer sound tiles
         let bottom = Self.card(frame: NSRect(x: 0, y: 0, width: width, height: Self.cardHeight))
         root.addSubview(bottom)
-        let tileWidth = (width - 28 - 10) / 2
+        let tileWidth = (width - 28 - 20) / 3
 
         let camera = DeviceTile(frame: NSRect(x: 14, y: 14, width: tileWidth, height: 48), symbol: "video")
         camera.onToggle = { [weak self] in self?.toggleCamera() }
@@ -97,11 +132,19 @@ final class RecordingSetupPanel: NSObject {
         bottom.addSubview(mic)
         micTile = mic
 
+        let sound = DeviceTile(frame: NSRect(x: 34 + tileWidth * 2, y: 14, width: tileWidth, height: 48), symbol: "speaker.wave.2")
+        sound.title = "Son de l’ordi"
+        sound.onToggle = { [weak self] in self?.toggleSystemAudio() }
+        sound.onPick = { [weak self] in self?.toggleSystemAudio() }
+        bottom.addSubview(sound)
+        soundTile = sound
+
         panel.contentView = root
         self.panel = panel
 
         refreshCameraTile()
         refreshMicTile()
+        updateSoundButton()
 
         panel.alphaValue = 0
         panel.orderFrontRegardless()
@@ -113,6 +156,27 @@ final class RecordingSetupPanel: NSObject {
         if micIsOn {
             startMeter()
         }
+    }
+
+    // MARK: - Screen
+
+    private func showScreenMenu() {
+        let menu = NSMenu()
+        for screen in screens {
+            let item = NSMenuItem(title: screen.name, action: #selector(screenPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = Int(screen.id)
+            item.state = screen.id == selectedScreen ? .on : .off
+            menu.addItem(item)
+        }
+        screenButton.map { menu.popUp(positioning: nil, at: NSPoint(x: 0, y: $0.bounds.height + 4), in: $0) }
+    }
+
+    @objc private func screenPicked(_ item: NSMenuItem) {
+        let id = CGDirectDisplayID(item.tag)
+        guard id != selectedScreen else { return }
+        selectedScreen = id
+        onScreenChange?(id)
     }
 
     func close() {
@@ -145,14 +209,14 @@ final class RecordingSetupPanel: NSObject {
     private func toggleSystemAudio() {
         Defaults.shared.recordSystemAudio.toggle()
         updateSoundButton()
-        Toast.show(message: Defaults.shared.recordSystemAudio ? "Son du Mac enregistré" : "Son du Mac coupé", style: .info)
     }
 
     private func updateSoundButton() {
         let on = Defaults.shared.recordSystemAudio
-        soundButton?.symbol = on ? "speaker.wave.2.fill" : "speaker.slash.fill"
-        soundButton?.dimmed = !on
-        soundButton?.toolTip = on ? "Son du Mac : enregistré (clic pour couper)" : "Son du Mac : coupé (clic pour l’enregistrer)"
+        soundTile?.isOn = on
+        soundTile?.toolTip = on
+            ? "Son de l’ordinateur enregistré (vidéo, musique, appel). Clic pour le couper."
+            : "Son de l’ordinateur coupé. Clic pour l’enregistrer."
     }
 
     // MARK: - Camera

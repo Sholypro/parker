@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.26
+- Enregistrement plein écran : avec plusieurs écrans, un bouton écran dans la barre permet de choisir lequel enregistrer. La barre et la bulle caméra se déplacent sur l'écran choisi, et Parker s'en souvient pour la prochaine fois (Mac).
+- Barre d'enregistrement (plein écran et zone) : nouvelle tuile « Son de l'ordi » avec un interrupteur On/Off, à côté de Caméra et Micro, pour enregistrer ou non le son de l'ordinateur (Mac).
+
 ## 2.25
 - Statistiques anonymes : une fois par jour, Parker télécharge un fichier texte vide de la dernière release, compté par GitHub. Rien n'est envoyé, aucun identifiant, aucune capture. Option « Partager des statistiques anonymes » dans les réglages pour le désactiver.
 
