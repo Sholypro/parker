@@ -148,11 +148,16 @@ enum RecordingComposer {
         }
         let sourceDuration = try await screen.load(.duration)
 
+        // The camera asset stays alive for the whole build: a track only holds a weak reference
+        // to its asset, and once the asset is gone the track cannot be inserted any more.
+        var cameraAsset: AVURLAsset?
         var cameraSource: AVAssetTrack?
         if project.hasCamera, FileManager.default.fileExists(atPath: project.cameraURL.path) {
             let camera = AVURLAsset(url: project.cameraURL)
+            cameraAsset = camera
             cameraSource = try? await camera.loadTracks(withMediaType: .video).first
         }
+        defer { withExtendedLifetime(cameraAsset) {} }
         if cameraSource == nil && ranges == nil {
             return Built(asset: screen, videoComposition: nil, duration: sourceDuration)
         }
@@ -236,7 +241,11 @@ enum RecordingComposer {
             let available = wanted.intersection(sourceRange)
             if available.duration.seconds > 0 {
                 let at = CMTimeAdd(cursor, CMTimeSubtract(available.start, wanted.start))
-                try? track.insertTimeRange(available, of: source, at: at)
+                do {
+                    try track.insertTimeRange(available, of: source, at: at)
+                } catch {
+                    NSLog("Parker: insertion impossible (\(error))")
+                }
             }
             cursor = CMTimeAdd(cursor, piece.duration)
         }
