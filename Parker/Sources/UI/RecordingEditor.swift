@@ -259,7 +259,9 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
                     self.isRendering = false
                     self.isRendered = true
                     self.statusLabel.stringValue = self.isDirty ? "Modifications non enregistrées"
-                        : (self.cameraMissing ? "Vidéo prête (images de la caméra introuvables)" : "Vidéo prête")
+                        : (self.cameraMissing
+                            ? "Vidéo prête (caméra introuvable : \(self.project.cameraFrames.map(String.init) ?? "?") images, début \(self.project.cameraFirstSeconds.map { String(format: "%.1f s", $0) } ?? "?"))"
+                            : "Vidéo prête")
                     self.updateButtons()
                     self.onRendered?(snapshot.outputURL)
                     let pending = self.afterRender

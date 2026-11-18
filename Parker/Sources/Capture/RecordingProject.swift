@@ -36,6 +36,9 @@ struct RecordingProject: Codable {
     var trimEnd: Double?
     /// Cuts in the middle (nil: one piece).
     var segments: [Segment]?
+    /// Diagnostics: camera frames written, and the time of the first one in the recording.
+    var cameraFrames: Int?
+    var cameraFirstSeconds: Double?
 
     /// Pieces covering the whole recording.
     func allSegments(duration: Double) -> [Segment] {
@@ -176,15 +179,28 @@ enum RecordingComposer {
         var cameraTrackID = kCMPersistentTrackID_Invalid
         if let cameraSource, let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
             let cameraRange = try await cameraSource.load(.timeRange)
-            // The camera file shares the screen's time line. If it does not line up at all
-            // (older recordings), it is laid from the start instead of being lost.
-            var offset = CMTime.zero
-            if cameraRange.start >= sourceDuration || cameraRange.duration.seconds <= 0 {
-                offset = CMTimeSubtract(.zero, cameraRange.start)
+            // Where the camera file really has images (its timeline may start with an empty edit)
+            let sourceSegments = (try? await cameraSource.load(.segments)) ?? []
+            let filled = sourceSegments.filter { !$0.isEmpty }.map { $0.timeMapping.target }
+            let firstImage = filled.map(\.start).min() ?? cameraRange.start
+            let lastImage = filled.map(\.end).max() ?? cameraRange.end
+            let imageRange = CMTimeRange(start: firstImage, end: lastImage)
+
+            // Normal case: the camera file shares the screen's time line
+            insert(pieces, from: cameraSource, sourceRange: imageRange, offset: .zero, into: track)
+            if !track.segments.contains(where: { !$0.isEmpty }) {
+                // Older recordings: camera images outside the video's time line. Lay them from
+                // the start of the video instead of losing them.
+                for segment in track.segments {
+                    track.removeTimeRange(segment.timeMapping.target)
+                }
+                insert(pieces, from: cameraSource, sourceRange: imageRange,
+                       offset: CMTimeSubtract(.zero, firstImage), into: track)
             }
-            insert(pieces, from: cameraSource, sourceRange: cameraRange, offset: offset, into: track)
-            if !track.segments.isEmpty {
+            if track.segments.contains(where: { !$0.isEmpty }) {
                 cameraTrackID = track.trackID
+            } else if let empty = Optional(track) {
+                composition.removeTrack(empty)
             }
         }
 

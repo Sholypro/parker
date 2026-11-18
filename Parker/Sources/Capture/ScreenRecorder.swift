@@ -25,6 +25,13 @@ class ScreenRecorder: NSObject {
 
     // Timestamp remapping state
     private var firstSampleTime: CMTime?
+    // Camera time line, measured only on the host clock (never compared with the screen's own
+    // timestamps): zero when the first screen frame arrived, pauses removed.
+    private var firstSampleHost: CMTime?
+    private var cameraPauseBegin: CMTime?
+    private var cameraPaused: CMTime = .zero
+    private var cameraFrameCount = 0
+    private var cameraFirstSeconds: Double?
     private var pauseBeginTime: CMTime?
     private var totalPausedCMTime: CMTime = .zero
 
@@ -539,6 +546,11 @@ class ScreenRecorder: NSObject {
         self.firstSampleTime = nil
         self.pauseBeginTime = nil
         self.totalPausedCMTime = .zero
+        self.firstSampleHost = nil
+        self.cameraPauseBegin = nil
+        self.cameraPaused = .zero
+        self.cameraFrameCount = 0
+        self.cameraFirstSeconds = nil
 
         let areaRect = cropRect
         await MainActor.run {
@@ -611,7 +623,9 @@ class ScreenRecorder: NSObject {
         }
 
         guard var project = project, assetWriter?.status == .completed else { return nil }
-        project.hasCamera = hasCamera
+        project.hasCamera = hasCamera && cameraFrameCount > 0
+        project.cameraFrames = cameraFrameCount
+        project.cameraFirstSeconds = cameraFirstSeconds
         project.layout = layout
         project.save()
         self.project = nil
@@ -621,11 +635,22 @@ class ScreenRecorder: NSObject {
     /// Camera frame (sample queue): written to the project's camera file on the screen's time line.
     private func handleCameraFrame(_ buffer: CMSampleBuffer, clock: CMClock?) {
         guard isRecording, !cameraWriterFailed, let imageBuffer = buffer.imageBuffer else { return }
-        // Arrival time on the host clock, the clock of the screen samples. The camera's own
-        // timestamps can use another clock, which put the camera far outside the video.
+        // Camera time = host time since the first screen frame arrived, minus pauses.
+        // The screen's own timestamps are never used here: whatever clock they are on, the
+        // camera cannot end up outside the video (the cause of the camera missing in the editor).
         _ = clock
-        let pts = CMClockGetTime(CMClockGetHostTimeClock())
-        guard firstSampleTime != nil, let time = remap(pts) else { return }
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        guard let start = firstSampleHost else { return }
+        if isPaused {
+            if cameraPauseBegin == nil { cameraPauseBegin = now }
+            return
+        }
+        if let begin = cameraPauseBegin {
+            cameraPaused = CMTimeAdd(cameraPaused, CMTimeSubtract(now, begin))
+            cameraPauseBegin = nil
+        }
+        let time = CMTimeSubtract(CMTimeSubtract(now, start), cameraPaused)
+        guard time.seconds >= 0 else { return }
 
         if cameraWriter == nil {
             guard let project = project,
@@ -648,8 +673,9 @@ class ScreenRecorder: NSObject {
         }
         guard let input = cameraWriterInput, input.isReadyForMoreMediaData else { return }
         let timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
-        if let copy = try? CMSampleBuffer(copying: buffer, withNewTiming: [timing]) {
-            input.append(copy)
+        if let copy = try? CMSampleBuffer(copying: buffer, withNewTiming: [timing]), input.append(copy) {
+            cameraFrameCount += 1
+            if cameraFirstSeconds == nil { cameraFirstSeconds = time.seconds }
         }
     }
 
@@ -658,6 +684,7 @@ class ScreenRecorder: NSObject {
     private func remap(_ pts: CMTime) -> CMTime? {
         if firstSampleTime == nil {
             firstSampleTime = pts
+            firstSampleHost = CMClockGetTime(CMClockGetHostTimeClock())
             assetWriter?.startSession(atSourceTime: .zero)
         }
         if isPaused {
