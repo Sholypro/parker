@@ -5,6 +5,9 @@ import SwiftUI
 struct ParkerApp {
     static func main() {
         let args = CommandLine.arguments
+        if args.contains("--selftest-camera") {
+            exit(CameraSelfTest.run())
+        }
         if let i = args.firstIndex(of: "--render-settings"), i + 1 < args.count {
             _ = NSApplication.shared
             MainActor.assumeIsolated { SettingsSnapshot.render(to: args[i + 1]) }

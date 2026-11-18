@@ -21,6 +21,9 @@ jobs:
             grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -20 | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           }
+      - name: Test caméra du montage
+        working-directory: Parker
+        run: .build/release/Parker --selftest-camera
       - name: Shaders Metal
         working-directory: Parker
         run: |
