@@ -8,6 +8,9 @@ struct ParkerApp {
         if args.contains("--selftest-camera") {
             exit(CameraSelfTest.run())
         }
+        if args.contains("--selftest-camera-big") {
+            exit(CameraSelfTest.run(big: true))
+        }
         if let i = args.firstIndex(of: "--render-settings"), i + 1 < args.count {
             _ = NSApplication.shared
             MainActor.assumeIsolated { SettingsSnapshot.render(to: args[i + 1]) }

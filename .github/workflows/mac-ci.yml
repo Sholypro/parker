@@ -24,6 +24,9 @@ jobs:
       - name: Test caméra du montage
         working-directory: Parker
         run: .build/release/Parker --selftest-camera
+      - name: Test durée de finalisation (4K + caméra)
+        working-directory: Parker
+        run: .build/release/Parker --selftest-camera-big
       - name: Shaders Metal
         working-directory: Parker
         run: |
