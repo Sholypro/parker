@@ -1,6 +1,7 @@
 import Cocoa
 import AVFoundation
 import CoreImage
+import Metal
 
 /// Where the webcam bubble sits in the final video. Coordinates are fractions of the video,
 /// origin top-left, so they survive any video size.
@@ -141,7 +142,8 @@ enum RecordingComposer {
 
     /// Screen + sound + (optionally) the camera bubble drawn by `CameraOverlayCompositor`.
     /// `ranges` (seconds): pieces to keep, played one after the other. nil: the whole recording.
-    static func build(_ project: RecordingProject, ranges: [(start: Double, end: Double)]? = nil) async throws -> Built {
+    static func build(_ project: RecordingProject, ranges: [(start: Double, end: Double)]? = nil,
+                      withCamera: Bool = true) async throws -> Built {
         let screen = AVURLAsset(url: project.screenURL)
         guard let screenVideo = try await screen.loadTracks(withMediaType: .video).first else {
             throw CocoaError(.fileReadCorruptFile)
@@ -152,7 +154,7 @@ enum RecordingComposer {
         // to its asset, and once the asset is gone the track cannot be inserted any more.
         var cameraAsset: AVURLAsset?
         var cameraSource: AVAssetTrack?
-        if project.hasCamera, FileManager.default.fileExists(atPath: project.cameraURL.path) {
+        if withCamera, project.hasCamera, FileManager.default.fileExists(atPath: project.cameraURL.path) {
             let camera = AVURLAsset(url: project.cameraURL)
             cameraAsset = camera
             cameraSource = try? await camera.loadTracks(withMediaType: .video).first
@@ -287,7 +289,9 @@ final class RecordingRenderer {
         let kept = project.keptRanges(duration: sourceDuration)
         guard !kept.isEmpty else { throw CocoaError(.fileWriteUnknown) }
         let isFull = kept.count == 1 && kept[0].start < 0.01 && kept[0].end >= sourceDuration - 0.01
-        let built = try await RecordingComposer.build(project, ranges: isFull ? nil : kept)
+        // Camera hidden: nothing to draw, so the video is copied instead of re-encoded
+        let built = try await RecordingComposer.build(project, ranges: isFull ? nil : kept,
+                                                      withCamera: project.layout.visible)
 
         let output = project.outputURL
         let fm = FileManager.default
@@ -356,13 +360,36 @@ final class CameraOverlayInstruction: NSObject, AVVideoCompositionInstructionPro
 }
 
 final class CameraOverlayCompositor: NSObject, AVVideoCompositing {
-    private static let pixelFormat: [String: Any] = [
-        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+    // Frames stay in the video's own format (YUV 4:2:0, what the decoder gives and the encoder
+    // takes): no full-frame conversion to RGB and back for every frame. BGRA is still accepted.
+    private static let pixelFormats: [String: Any] = [
+        kCVPixelBufferPixelFormatTypeKey as String: [
+            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+            kCVPixelFormatType_32BGRA,
+        ],
+        kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
     ]
-    var sourcePixelBufferAttributes: [String: Any]? { Self.pixelFormat }
-    var requiredPixelBufferAttributesForRenderContext: [String: Any] { Self.pixelFormat }
+    private static let outputFormat: [String: Any] = [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+        kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+    ]
+    var sourcePixelBufferAttributes: [String: Any]? { Self.pixelFormats }
+    var requiredPixelBufferAttributesForRenderContext: [String: Any] { Self.outputFormat }
 
-    private let context = CIContext(options: [.cacheIntermediates: false])
+    /// GPU context without color management: pixels are copied as they are (the screen already
+    /// is in the video's color space), which removes two full-frame conversions per frame.
+    private let context: CIContext = {
+        let options: [CIContextOption: Any] = [
+            .workingColorSpace: NSNull(),
+            .outputColorSpace: NSNull(),
+            .cacheIntermediates: false,
+        ]
+        if let device = MTLCreateSystemDefaultDevice() {
+            return CIContext(mtlDevice: device, options: options)
+        }
+        return CIContext(options: options)
+    }()
 
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
 
@@ -373,26 +400,31 @@ final class CameraOverlayCompositor: NSObject, AVVideoCompositing {
             request.finish(with: CocoaError(.fileReadCorruptFile))
             return
         }
-        var image = CIImage(cvPixelBuffer: screenBuffer)
+        let raw: [CIImageOption: Any] = [.colorSpace: NSNull()]
+        var image = CIImage(cvPixelBuffer: screenBuffer, options: raw)
         let extent = image.extent
 
         if instruction.layout.visible,
            instruction.cameraTrackID != kCMPersistentTrackID_Invalid,
            let cameraBuffer = request.sourceFrame(byTrackID: instruction.cameraTrackID) {
-            image = Self.overlay(camera: CIImage(cvPixelBuffer: cameraBuffer), on: image, layout: instruction.layout)
+            image = Self.overlay(camera: CIImage(cvPixelBuffer: cameraBuffer, options: raw), on: image,
+                                 layout: instruction.layout)
         }
 
-        context.render(image.cropped(to: extent), to: output)
+        context.render(image.cropped(to: extent), to: output, bounds: extent, colorSpace: nil)
         request.finish(withComposedVideoFrame: output)
     }
 
+    /// Draws the round, mirrored camera over the screen. Every filter works on the bubble's
+    /// square only (not on the whole 4K frame), then the bubble is laid over the screen.
     static func overlay(camera: CIImage, on screen: CIImage, layout: CameraLayout) -> CIImage {
         let W = screen.extent.width
         let H = screen.extent.height
-        let diameter = CGFloat(layout.size) * min(W, H)
+        let diameter = (CGFloat(layout.size) * min(W, H)).rounded()
         let radius = diameter / 2
-        let cx = CGFloat(layout.centerX) * W
-        let cy = (1 - CGFloat(layout.centerY)) * H   // Core Image: origin bottom-left
+        let cx = (CGFloat(layout.centerX) * W).rounded()
+        let cy = ((1 - CGFloat(layout.centerY)) * H).rounded()   // Core Image: origin bottom-left
+        let box = CGRect(x: cx - radius, y: cy - radius, width: diameter, height: diameter)
 
         // Square crop of the camera, mirrored like the on-screen bubble, scaled and placed
         let ce = camera.extent
@@ -401,45 +433,47 @@ final class CameraOverlayCompositor: NSObject, AVVideoCompositing {
         cam = cam.transformed(by: CGAffineTransform(translationX: -cam.extent.minX, y: -cam.extent.minY))
         let scale = diameter / side
         cam = cam.transformed(by: CGAffineTransform(scaleX: -scale, y: scale)
-            .concatenating(CGAffineTransform(translationX: diameter, y: 0)))
-        cam = cam.transformed(by: CGAffineTransform(translationX: cx - radius, y: cy - radius))
+            .concatenating(CGAffineTransform(translationX: box.minX + diameter, y: box.minY)))
+            .cropped(to: box)
 
         let center = CIVector(x: cx, y: cy)
-        func disk(_ r: CGFloat) -> CIImage {
+        func disk(_ r: CGFloat, in rect: CGRect) -> CIImage {
             CIFilter(name: "CIRadialGradient", parameters: [
                 "inputCenter": center,
                 "inputRadius0": max(0, r - 0.75),
                 "inputRadius1": r + 0.75,
                 "inputColor0": CIColor.white,
                 "inputColor1": CIColor.black,
-            ])?.outputImage?.cropped(to: screen.extent) ?? CIImage.empty()
+            ])?.outputImage?.cropped(to: rect) ?? CIImage.empty()
         }
 
-        // Soft shadow under the bubble
-        let shadowMask = CIFilter(name: "CIRadialGradient", parameters: [
+        // Soft shadow under the bubble (its own small square)
+        let shadowBox = box.insetBy(dx: -radius * 0.15, dy: -radius * 0.2)
+        let shadow = CIFilter(name: "CIRadialGradient", parameters: [
             "inputCenter": CIVector(x: cx, y: cy - diameter * 0.03),
             "inputRadius0": radius * 0.9,
             "inputRadius1": radius * 1.12,
             "inputColor0": CIColor(red: 0, green: 0, blue: 0, alpha: 0.35),
             "inputColor1": CIColor(red: 0, green: 0, blue: 0, alpha: 0),
-        ])?.outputImage?.cropped(to: screen.extent)
-        var result = shadowMask.map { $0.composited(over: screen) } ?? screen
+        ])?.outputImage?.cropped(to: shadowBox) ?? CIImage.empty()
 
-        result = cam.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: result,
-            kCIInputMaskImageKey: disk(radius),
-        ])
+        // Camera cut into a circle, transparent around it
+        let round = cam.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: CIImage.empty(),
+            kCIInputMaskImageKey: disk(radius, in: box),
+        ]).cropped(to: box)
 
-        // Thin white ring, like the bubble
+        // Thin white ring, like the bubble on screen
         let ringWidth = max(2, diameter * 0.018)
-        let ringMask = disk(radius - ringWidth).applyingFilter("CISubtractBlendMode", parameters: [
-            kCIInputBackgroundImageKey: disk(radius),
+        let ringMask = disk(radius - ringWidth, in: box).applyingFilter("CISubtractBlendMode", parameters: [
+            kCIInputBackgroundImageKey: disk(radius, in: box),
         ])
-        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 0.92)).cropped(to: screen.extent)
-        result = white.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: result,
-            kCIInputMaskImageKey: ringMask,
-        ])
-        return result
+        let ring = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 0.92)).cropped(to: box)
+            .applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: CIImage.empty(),
+                kCIInputMaskImageKey: ringMask,
+            ]).cropped(to: box)
+
+        return ring.composited(over: round).composited(over: shadow).composited(over: screen)
     }
 }
