@@ -114,7 +114,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
         content.addSubview(timeLabel)
 
         if project.hasCamera {
-            let check = NSButton(checkboxWithTitle: "Caméra", target: self, action: #selector(cameraToggled))
+            let check = FirstClickButton(checkboxWithTitle: "Caméra", target: self, action: #selector(cameraToggled))
             check.state = project.layout.visible ? .on : .off
             check.frame = NSRect(x: width - 330, y: 133, width: 90, height: 22)
             content.addSubview(check)
@@ -191,6 +191,9 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
         self.window = window
         updateButtons()
         SpaceSafeFocus.present(window, firstResponder: nil)
+        // macOS 14+: ask to come to the front (the system may wait for the user; the buttons
+        // work on the first click either way)
+        if #available(macOS 14.0, *) { NSApp.activate() }
 
         Task { await load() }
     }
@@ -234,7 +237,11 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
                 self.updateTime()
             }
         } catch {
-            await MainActor.run { self.statusLabel.stringValue = "Impossible d’ouvrir la vidéo" }
+            await MainActor.run {
+                self.loadFailed = true
+                self.updateButtons()
+                self.statusLabel.stringValue = "Impossible d’ouvrir la vidéo"
+            }
             return
         }
         // The finished video is written right away, so it is ready to copy or share
@@ -249,6 +256,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
         isRendered = false
         statusLabel.stringValue = "Finalisation de la vidéo…"
         updateButtons()
+        startProgress()
         let snapshot = project
         snapshot.save()
         Task { [self] in
@@ -257,6 +265,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
                 await MainActor.run {
                     guard self.renderer === renderer else { return }
                     self.isRendering = false
+                    self.stopProgress()
                     self.isRendered = true
                     self.statusLabel.stringValue = self.isDirty ? "Modifications non enregistrées"
                         : (self.cameraMissing
@@ -274,6 +283,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
                 await MainActor.run {
                     guard self.renderer === renderer else { return }
                     self.isRendering = false
+                    self.stopProgress()
                     self.statusLabel.stringValue = "Échec de l’enregistrement de la vidéo"
                     self.afterRender = []
                     self.updateButtons()
@@ -303,7 +313,6 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
     }
 
     private func updateButtons() {
-        let busy = !isRendered && !isDirty
         saveButton?.isEnabled = isDirty
         saveButton?.attributedTitle = NSAttributedString(string: isDirty ? "Enregistrer" : "Enregistré", attributes: [
             .foregroundColor: NSColor.white.withAlphaComponent(isDirty ? 1 : 0.6),
@@ -312,9 +321,30 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
         saveButton?.layer?.backgroundColor = (isDirty
             ? NSColor(red: 0.04, green: 0.52, blue: 1.0, alpha: 1)
             : NSColor.white.withAlphaComponent(0.1)).cgColor
+        // Copy, Share and Finder stay clickable while the video is being finished: the action
+        // is queued and runs as soon as the file is ready (they used to be greyed out, which
+        // felt like buttons that did not work).
         for button in [copyButton, shareButton, finderButton] {
-            button?.isEnabled = !busy
+            button?.isEnabled = !loadFailed
         }
+    }
+
+    private var loadFailed = false
+    private var progressTimer: Timer?
+
+    private func startProgress() {
+        progressTimer?.invalidate()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self, self.isRendering, let renderer = self.renderer else { return }
+            let percent = Int((renderer.progress * 100).rounded())
+            let waiting = self.afterRender.isEmpty ? "" : " L’action demandée suivra."
+            self.statusLabel.stringValue = "Finalisation de la vidéo… \(percent) %" + waiting
+        }
+    }
+
+    private func stopProgress() {
+        progressTimer?.invalidate()
+        progressTimer = nil
     }
 
     // MARK: - Playback
@@ -561,7 +591,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
     // MARK: - Helpers
 
     private func iconButton(_ symbol: String, action: Selector) -> NSButton {
-        let button = NSButton(frame: .zero)
+        let button = FirstClickButton(frame: .zero)
         button.bezelStyle = .accessoryBarAction
         button.isBordered = false
         button.imagePosition = .imageOnly
@@ -577,7 +607,7 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
     }
 
     private func textButton(_ title: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
+        let button = FirstClickButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
         button.controlSize = .large
         return button
@@ -607,6 +637,13 @@ final class RecordingEditorController: NSObject, NSWindowDelegate {
     }
 }
 
+/// Button that reacts to the first click even when the window is not active yet. Since macOS 14
+/// an app cannot always bring itself to the front, so the editor can open behind the active app:
+/// a plain button then needs one click to activate the window and a second one to work.
+final class FirstClickButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 private final class EditorWindow: NSWindow {
     var onSpace: (() -> Void)?
     var onDelete: (() -> Void)?
@@ -625,6 +662,7 @@ private final class EditorWindow: NSWindow {
 // MARK: - Camera bubble drag over the video
 
 final class CameraDragView: NSView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     var onLayoutChange: ((CameraLayout) -> Void)?
     var onClick: (() -> Void)?
     var videoSize = CGSize(width: 16, height: 9) { didSet { needsDisplay = true; window?.invalidateCursorRects(for: self) } }
@@ -739,6 +777,7 @@ final class CameraDragView: NSView {
 // MARK: - Trim bar (frames strip with start and end handles, like QuickTime)
 
 final class TrimBarView: NSView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     enum Edge { case start, end }
 
     var onSeek: ((Double) -> Void)?

@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.29
+- Fenêtre de montage : les boutons réagissent dès le premier clic, même quand la fenêtre s'ouvre derrière l'app active (avant, le premier clic ne servait qu'à activer la fenêtre) (Mac).
+- Pendant « Finalisation de la vidéo », Copier, Partager et Finder ne sont plus grisés : l'action est mise en attente et part dès que la vidéo est prête. Un pourcentage indique l'avancement (Mac).
+
 ## 2.28
 - Correction (vérifiée par un test automatique) : la caméra apparaît enfin dans la fenêtre de montage et dans la vidéo finale. Le fichier caméra était fermé trop tôt pendant le montage, donc ses images ne pouvaient pas être ajoutées. Les enregistrements faits avec les versions précédentes retrouvent aussi leur caméra (Mac).
 

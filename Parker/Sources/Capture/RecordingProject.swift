@@ -272,6 +272,9 @@ enum RecordingComposer {
 final class RecordingRenderer {
     private var session: AVAssetExportSession?
 
+    /// 0 to 1 while exporting (1 when there is nothing to export).
+    var progress: Float { session?.progress ?? 0 }
+
     func cancel() {
         session?.cancelExport()
         session = nil
