@@ -2,6 +2,7 @@ import Cocoa
 import AVFoundation
 import CoreImage
 import Metal
+import VideoToolbox
 
 /// Where the webcam bubble sits in the final video. Coordinates are fractions of the video,
 /// origin top-left, so they survive any video size.
@@ -273,13 +274,28 @@ enum RecordingComposer {
 
 final class RecordingRenderer {
     private var session: AVAssetExportSession?
+    private var reader: AVAssetReader?
+    private var writer: AVAssetWriter?
+    private let lock = NSLock()
+    private var encodeProgress: Float = 0
+    private var cancelled = false
 
-    /// 0 to 1 while exporting (1 when there is nothing to export).
-    var progress: Float { session?.progress ?? 0 }
+    /// 0 to 1 while exporting.
+    var progress: Float {
+        if let session { return session.progress }
+        lock.lock(); defer { lock.unlock() }
+        return encodeProgress
+    }
 
     func cancel() {
         session?.cancelExport()
         session = nil
+        lock.lock()
+        cancelled = true
+        let reader = self.reader, writer = self.writer
+        lock.unlock()
+        reader?.cancelReading()
+        writer?.cancelWriting()
     }
 
     /// Writes the finished video to `project.outputURL` (replacing it).
@@ -305,8 +321,21 @@ final class RecordingRenderer {
             return
         }
 
-        let preset = built.videoComposition == nil ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
-        guard let session = AVAssetExportSession(asset: built.asset, presetName: preset) else {
+        // Camera to draw: our own encoder, tuned for speed (see encodeFast)
+        if let composition = built.videoComposition {
+            lock.lock(); cancelled = false; encodeProgress = 0; lock.unlock()
+            do {
+                try await encodeFast(built, composition: composition, screenURL: project.screenURL, to: tmp)
+            } catch {
+                try? fm.removeItem(at: tmp)
+                throw error
+            }
+            try replace(output, with: tmp)
+            return
+        }
+
+        // Only cuts: the pieces are copied, nothing is re-encoded
+        guard let session = AVAssetExportSession(asset: built.asset, presetName: AVAssetExportPresetPassthrough) else {
             throw CocoaError(.fileWriteUnknown)
         }
         session.outputURL = tmp
@@ -323,6 +352,134 @@ final class RecordingRenderer {
             throw session.error ?? CocoaError(.fileWriteUnknown)
         }
         try replace(output, with: tmp)
+    }
+
+    /// Reads the composition (camera drawn by the compositor) and encodes it with the hardware
+    /// encoder set to favour speed, at about the bit rate of the original recording.
+    /// AVAssetExportSession's "highest quality" preset encoded several times slower.
+    private func encodeFast(_ built: RecordingComposer.Built, composition: AVVideoComposition,
+                            screenURL: URL, to url: URL) async throws {
+        let asset = built.asset
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let size = composition.renderSize
+        let duration = max(0.01, built.duration.seconds)
+
+        // Bit rate of the original screen file, within sensible limits
+        var bitRate = Double(size.width * size.height) * 30 * 0.12
+        if let track = try? await AVURLAsset(url: screenURL).loadTracks(withMediaType: .video).first,
+           let rate = try? await track.load(.estimatedDataRate), rate > 0 {
+            bitRate = Double(rate) * 1.1
+        }
+        bitRate = min(max(bitRate, 4_000_000), 60_000_000)
+
+        let reader = try AVAssetReader(asset: asset)
+        let videoOut = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+        ])
+        videoOut.videoComposition = composition
+        videoOut.alwaysCopiesSampleData = false
+        guard reader.canAdd(videoOut) else { throw CocoaError(.fileReadUnknown) }
+        reader.add(videoOut)
+
+        var audioOut: AVAssetReaderAudioMixOutput?
+        if !audioTracks.isEmpty {
+            let out = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 48000,
+                AVNumberOfChannelsKey: 2,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false,
+            ])
+            if reader.canAdd(out) { reader.add(out); audioOut = out }
+        }
+
+        let writer = try AVAssetWriter(url: url, fileType: .mp4)
+        writer.shouldOptimizeForNetworkUse = true
+        let videoIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(size.width) & ~1,
+            AVVideoHeightKey: Int(size.height) & ~1,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: Int(bitRate),
+                AVVideoExpectedSourceFrameRateKey: 30,
+                AVVideoMaxKeyFrameIntervalKey: 60,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality as String: true,
+            ] as [String: Any],
+        ])
+        videoIn.expectsMediaDataInRealTime = false
+        guard writer.canAdd(videoIn) else { throw CocoaError(.fileWriteUnknown) }
+        writer.add(videoIn)
+        var audioIn: AVAssetWriterInput?
+        if audioOut != nil {
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48000,
+                AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 160000,
+            ])
+            if writer.canAdd(input) { writer.add(input); audioIn = input }
+        }
+
+        lock.lock()
+        let stop = cancelled
+        self.reader = reader
+        self.writer = writer
+        lock.unlock()
+        if stop { throw CancellationError() }
+
+        guard reader.startReading() else { throw reader.error ?? CocoaError(.fileReadUnknown) }
+        guard writer.startWriting() else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+        writer.startSession(atSourceTime: .zero)
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let group = DispatchGroup()
+            pump(videoOut, into: videoIn, queue: DispatchQueue(label: "parker.encode.video"), group: group) { [weak self] time in
+                guard let self else { return }
+                self.lock.lock()
+                self.encodeProgress = Float(min(1, time.seconds / duration))
+                self.lock.unlock()
+            }
+            if let audioOut, let audioIn {
+                pump(audioOut, into: audioIn, queue: DispatchQueue(label: "parker.encode.audio"), group: group, onSample: nil)
+            }
+            group.notify(queue: .global()) { continuation.resume() }
+        }
+
+        lock.lock()
+        let wasCancelled = cancelled
+        self.reader = nil
+        self.writer = nil
+        lock.unlock()
+        if wasCancelled { throw CancellationError() }
+        guard reader.status == .completed else {
+            writer.cancelWriting()
+            throw reader.error ?? CocoaError(.fileReadUnknown)
+        }
+        await writer.finishWriting()
+        guard writer.status == .completed else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+    }
+
+    private func pump(_ output: AVAssetReaderOutput, into input: AVAssetWriterInput, queue: DispatchQueue,
+                      group: DispatchGroup, onSample: ((CMTime) -> Void)?) {
+        group.enter()
+        var done = false
+        input.requestMediaDataWhenReady(on: queue) {
+            guard !done else { return }
+            while input.isReadyForMoreMediaData {
+                guard let buffer = output.copyNextSampleBuffer(), input.append(buffer) else {
+                    done = true
+                    input.markAsFinished()
+                    group.leave()
+                    return
+                }
+                onSample?(CMSampleBufferGetPresentationTimeStamp(buffer))
+            }
+        }
     }
 
     private func replace(_ url: URL, with tmp: URL) throws {
