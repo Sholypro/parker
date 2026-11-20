@@ -78,17 +78,18 @@ enum CameraSelfTest {
 
         let renderer = RecordingRenderer()
         let started = Date()
-        let task = Task { try await renderer.render(project) }
+        let finished = Flag()
+        let task = Task {
+            defer { finished.set() }
+            try await renderer.render(project)
+        }
         var last: Float = -1
-        while true {
-            try await Task.sleep(nanoseconds: 2_000_000_000)
+        while !finished.value {
+            try await Task.sleep(nanoseconds: 500_000_000)
             let elapsed = Date().timeIntervalSince(started)
             if renderer.progress != last {
                 last = renderer.progress
                 print(String(format: "SELFTEST big: %.0f s, %.0f %%", elapsed, last * 100))
-            }
-            if FileManager.default.fileExists(atPath: project.outputURL.path), renderer.progress == 0, elapsed > 2 {
-                break
             }
             if elapsed > 180 {
                 renderer.cancel()
@@ -158,4 +159,11 @@ enum CameraSelfTest {
         await writer.finishWriting()
         guard writer.status == .completed else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
     }
+}
+
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    var value: Bool { lock.lock(); defer { lock.unlock() }; return done }
+    func set() { lock.lock(); done = true; lock.unlock() }
 }
