@@ -41,6 +41,8 @@ struct RecordingProject: Codable {
     /// Diagnostics: camera frames written, and the time of the first one in the recording.
     var cameraFrames: Int?
     var cameraFirstSeconds: Double?
+    /// Export quality chosen in the editor: maximum height in pixels (nil or 0: as recorded).
+    var exportMaxHeight: Int?
 
     /// Pieces covering the whole recording.
     func allSegments(duration: Double) -> [Segment] {
@@ -314,18 +316,36 @@ final class RecordingRenderer {
         try? fm.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
         let tmp = output.deletingLastPathComponent().appendingPathComponent(".parker-\(UUID().uuidString).mp4")
 
-        // Nothing to draw and nothing cut: the screen file is the result
-        if built.videoComposition == nil && isFull {
+        // Export quality: a smaller size than the recording means re-encoding
+        var sourceSize = CGSize.zero
+        if let track = try? await AVURLAsset(url: project.screenURL).loadTracks(withMediaType: .video).first,
+           let natural = try? await track.load(.naturalSize) {
+            sourceSize = natural
+        }
+        var outputSize = built.videoComposition?.renderSize ?? sourceSize
+        if let limit = project.exportMaxHeight, limit > 0, outputSize.height > CGFloat(limit) + 1 {
+            let scale = CGFloat(limit) / outputSize.height
+            outputSize = CGSize(width: (outputSize.width * scale / 2).rounded() * 2, height: CGFloat(limit))
+        }
+        let resized = outputSize.height < (built.videoComposition?.renderSize ?? sourceSize).height - 1
+
+        // Nothing to draw, nothing cut, same size: the screen file is the result
+        if built.videoComposition == nil && isFull && !resized {
             try fm.copyItem(at: project.screenURL, to: tmp)
             try replace(output, with: tmp)
             return
         }
 
-        // Camera to draw: our own encoder, tuned for speed (see encodeFast)
-        if let composition = built.videoComposition {
+        // Camera to draw or smaller size: our own encoder, tuned for speed (see encodeFast)
+        if built.videoComposition != nil || resized {
+            var composition = built.videoComposition
+            if composition == nil {
+                composition = try await AVMutableVideoComposition.videoComposition(withPropertiesOf: built.asset)
+            }
             lock.lock(); cancelled = false; encodeProgress = 0; lock.unlock()
             do {
-                try await encodeFast(built, composition: composition, screenURL: project.screenURL, to: tmp)
+                try await encodeFast(built, composition: composition!, outputSize: outputSize,
+                                     screenURL: project.screenURL, to: tmp)
             } catch {
                 try? fm.removeItem(at: tmp)
                 throw error
@@ -358,18 +378,20 @@ final class RecordingRenderer {
     /// encoder set to favour speed, at about the bit rate of the original recording.
     /// AVAssetExportSession's "highest quality" preset encoded several times slower.
     private func encodeFast(_ built: RecordingComposer.Built, composition: AVVideoComposition,
-                            screenURL: URL, to url: URL) async throws {
+                            outputSize: CGSize, screenURL: URL, to url: URL) async throws {
         let asset = built.asset
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
-        let size = composition.renderSize
+        let size = outputSize
         let duration = max(0.01, built.duration.seconds)
 
         // Bit rate of the original screen file, within sensible limits
         var bitRate = Double(size.width * size.height) * 30 * 0.12
         if let track = try? await AVURLAsset(url: screenURL).loadTracks(withMediaType: .video).first,
            let rate = try? await track.load(.estimatedDataRate), rate > 0 {
-            bitRate = Double(rate) * 1.1
+            // Same quality per pixel as the recording, fewer pixels when the size is reduced
+            let shrink = size.height / max(composition.renderSize.height, 1)
+            bitRate = Double(rate) * 1.1 * Double(min(1, shrink * shrink))
         }
         bitRate = min(max(bitRate, 4_000_000), 60_000_000)
 
@@ -403,6 +425,7 @@ final class RecordingRenderer {
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: Int(size.width) & ~1,
             AVVideoHeightKey: Int(size.height) & ~1,
+            AVVideoScalingModeKey: AVVideoScalingModeResizeAspect,
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: Int(bitRate),
                 AVVideoExpectedSourceFrameRateKey: 30,

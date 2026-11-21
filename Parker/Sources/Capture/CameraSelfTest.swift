@@ -59,7 +59,20 @@ enum CameraSelfTest {
         let frame = try await exportGenerator.image(at: CMTime(seconds: 1, preferredTimescale: 600)).image
         let exportRed = isRed(frame)
         print("SELFTEST export centre red: \(exportRed)")
-        return previewRed && exportRed ? 0 : 1
+
+        // Export quality: a lower height re-encodes at the smaller size, camera still drawn
+        project.exportMaxHeight = 180
+        try await RecordingRenderer().render(project)
+        let small = AVURLAsset(url: project.outputURL)
+        let smallSize = try await small.loadTracks(withMediaType: .video).first?.load(.naturalSize) ?? .zero
+        let smallGenerator = AVAssetImageGenerator(asset: small)
+        smallGenerator.requestedTimeToleranceBefore = .zero
+        smallGenerator.requestedTimeToleranceAfter = .zero
+        let smallFrame = try await smallGenerator.image(at: CMTime(seconds: 1, preferredTimescale: 600)).image
+        let smallRed = isRed(smallFrame)
+        print("SELFTEST quality 180p: size \(Int(smallSize.width))x\(Int(smallSize.height)), centre red: \(smallRed)")
+        let smallOK = Int(smallSize.height) == 180 && smallRed
+        return previewRed && exportRed && smallOK ? 0 : 1
     }
 
     /// Real-life size: 4K screen at 60 fps for 10 s + 720p camera. Prints how long the

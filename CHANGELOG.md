@@ -4,6 +4,13 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.31
+- Nouvelle fin d'enregistrement : une vignette vidéo apparaît avec un aperçu qui tourne en boucle, la durée, « Copier » et « Modifier ». La vidéo finale se prépare pendant ce temps (Mac).
+- Fenêtre de montage refaite : nom de la vidéo modifiable en haut, « Annuler » (⌘Z), menu « Qualité » (1080p, 1440p ou 4K) et menu « Exporter » (copier, enregistrer en MP4, GIF, partager, Finder) (Mac).
+- Les modifications s'appliquent toutes seules, plus de bouton « Enregistrer » (Mac).
+- Au survol de la bulle caméra, une petite barre permet de choisir sa taille (S, M, L) ou de la masquer (Mac).
+- « Supprimer » et « Couper ici » (⌘B) apparaissent au-dessus de la frise, au bon moment (Mac).
+
 ## 2.30
 - Nouveau réglage « Qualité vidéo » (Réglages > Capture > Enregistrement vidéo) : Full HD (1080p), QHD (1440p) ou Maximum (4K). Par défaut, 1440p : la vidéo reste nette, le fichier est plus léger et la finalisation du montage bien plus rapide (Mac).
 

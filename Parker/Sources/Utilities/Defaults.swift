@@ -233,6 +233,12 @@ class Defaults {
         deleteOwnedFiles(previous.filter { !recentCaptures.contains($0) })
     }
 
+    /// A video renamed in the editor: the new name takes the old one's place, no file is deleted.
+    func renameRecentCapture(from old: URL, to new: URL) {
+        recentCaptures = recentCaptures.filter { $0 != old }
+        addRecentCapture(new)
+    }
+
     func removeRecentCapture(_ url: URL) {
         recentCaptures = recentCaptures.filter { $0 != url }
         deleteOwnedFiles([url])

@@ -76,8 +76,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.menuBarController.rebuildMenu()
         }
         screenRecorder.onProjectFinished = { [weak self] project in
-            RecordingEditorController.present(project) { url in
-                Defaults.shared.addRecentCapture(url)
+            // Video card first (Copier / Modifier), the finished video is written meanwhile
+            RecordingThumbnailController.show(project) { url, renamedFrom in
+                if let renamedFrom {
+                    Defaults.shared.renameRecentCapture(from: renamedFrom, to: url)
+                } else {
+                    Defaults.shared.addRecentCapture(url)
+                }
                 self?.menuBarController.rebuildMenu()
             }
         }
