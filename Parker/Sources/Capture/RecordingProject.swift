@@ -41,8 +41,11 @@ struct RecordingProject: Codable {
     /// Diagnostics: camera frames written, and the time of the first one in the recording.
     var cameraFrames: Int?
     var cameraFirstSeconds: Double?
-    /// Export quality chosen in the editor: maximum height in pixels (nil or 0: as recorded).
+    /// Export quality chosen in the editor: maximum height in pixels. nil: default (1440p), 0: as recorded.
     var exportMaxHeight: Int?
+    static let defaultExportHeight = 1440
+    /// Height limit actually applied to the finished video (0: none).
+    var effectiveExportHeight: Int { exportMaxHeight ?? Self.defaultExportHeight }
 
     /// Pieces covering the whole recording.
     func allSegments(duration: Double) -> [Segment] {
@@ -323,7 +326,8 @@ final class RecordingRenderer {
             sourceSize = natural
         }
         var outputSize = built.videoComposition?.renderSize ?? sourceSize
-        if let limit = project.exportMaxHeight, limit > 0, outputSize.height > CGFloat(limit) + 1 {
+        let limit = project.effectiveExportHeight
+        if limit > 0, outputSize.height > CGFloat(limit) + 1 {
             let scale = CGFloat(limit) / outputSize.height
             outputSize = CGSize(width: (outputSize.width * scale / 2).rounded() * 2, height: CGFloat(limit))
         }

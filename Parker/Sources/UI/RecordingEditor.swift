@@ -592,7 +592,8 @@ final class RecordingEditorController: NSObject, NSWindowDelegate, NSTextFieldDe
         let kept = project.keptRanges(duration: duration)
         let total = kept.reduce(0) { $0 + ($1.end - $1.start) }
         var height = Int(renderSize.height)
-        if let limit = project.exportMaxHeight, limit > 0 { height = min(height, limit) }
+        let limit = project.effectiveExportHeight
+        if limit > 0 { height = min(height, limit) }
         var text = "\(Self.format(total))  ·  \(height)p"
         if failed {
             text += "  ·  échec de la préparation"
@@ -888,15 +889,16 @@ final class RecordingEditorController: NSObject, NSWindowDelegate, NSTextFieldDe
     @objc private func qualityClicked() {
         let menu = NSMenu()
         let source = Int(renderSize.height)
-        let current = project.exportMaxHeight ?? 0
+        let current = project.effectiveExportHeight
         for (title, height) in Self.qualities {
             let item = NSMenuItem(title: title, action: #selector(qualityPicked(_:)), keyEquivalent: "")
             item.target = self
             item.tag = height
-            let effective = height == 0 || height >= source ? 0 : height
-            let currentEffective = current == 0 || current >= source ? 0 : current
-            item.state = effective == currentEffective && (height == 0 || height < source || current == height) ? .on : .off
-            if height > 0 && height >= source { item.isEnabled = false; item.toolTip = "La vidéo enregistrée est déjà plus petite" }
+            item.state = height == current ? .on : .off
+            // Always selectable: a smaller recording simply keeps its own size (never enlarged)
+            if height > 0 && height >= source {
+                item.toolTip = "La vidéo enregistrée fait \(source)p : elle garde cette taille"
+            }
             menu.addItem(item)
         }
         menu.autoenablesItems = false
@@ -904,8 +906,8 @@ final class RecordingEditorController: NSObject, NSWindowDelegate, NSTextFieldDe
     }
 
     @objc private func qualityPicked(_ item: NSMenuItem) {
-        let value: Int? = item.tag == 0 ? nil : item.tag
-        guard value != project.exportMaxHeight else { return }
+        let value = item.tag
+        guard value != project.effectiveExportHeight else { return }
         recordUndo()
         undoCoalesceUntil = .distantPast
         project.exportMaxHeight = value
