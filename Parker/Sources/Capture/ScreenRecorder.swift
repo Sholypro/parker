@@ -399,11 +399,14 @@ class ScreenRecorder: NSObject {
     }
 
     /// Video size in pixels: the display's real pixel density (1x on most ultra-wide monitors,
-    /// 2x on Retina) instead of a fixed 2x, kept within the H.264 limit (4096 x 2304) and even.
+    /// 2x on Retina) instead of a fixed 2x, kept within the H.264 limit (4096 x 2304), within the
+    /// "Qualité vidéo" setting (1080p, 1440p by default, or the screen's full resolution), and even.
     private static func videoSize(points: CGSize, scale: CGFloat) -> (width: Int, height: Int) {
         var width = points.width * scale
         var height = points.height * scale
-        let fit = min(1, 4096 / max(width, 1), 2304 / max(height, 1))
+        let limit = Defaults.shared.recordMaxHeight
+        let quality = limit > 0 ? CGFloat(limit) / max(height, 1) : 1
+        let fit = min(1, 4096 / max(width, 1), 2304 / max(height, 1), quality)
         width *= fit
         height *= fit
         return (max(2, Int(width) & ~1), max(2, Int(height) & ~1))

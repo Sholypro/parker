@@ -159,6 +159,13 @@ class Defaults {
         set { store.set(newValue, forKey: "microphoneID") }
     }
 
+    /// Maximum height of screen recordings in pixels: 1080, 1440 (default) or 0 for the screen's
+    /// full resolution. Smaller videos are lighter and much faster to finish in the editor.
+    var recordMaxHeight: Int {
+        get { store.object(forKey: "recordMaxHeight") as? Int ?? 1440 }
+        set { store.set(newValue, forKey: "recordMaxHeight") }
+    }
+
     /// Screen recorded in full-screen mode (nil: the one under the mouse).
     var recordDisplayID: CGDirectDisplayID? {
         get { (store.object(forKey: "recordDisplayID") as? NSNumber).map { CGDirectDisplayID($0.uint32Value) } }

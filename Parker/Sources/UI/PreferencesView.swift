@@ -436,6 +436,7 @@ struct CaptureSettingsPage: View {
     @AppStorage("includeWindowShadow") private var includeWindowShadow: Bool = true
     @AppStorage("freezeScreen") private var freezeScreen: Bool = true
     @AppStorage("recordWithCamera") private var recordWithCamera: Bool = false
+    @AppStorage("recordMaxHeight") private var recordMaxHeight: Int = 1440
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -476,10 +477,26 @@ struct CaptureSettingsPage: View {
             }
 
             SettingsGroup(title: "ENREGISTREMENT VIDÉO") {
+                SettingsRow(title: "Qualité vidéo", subtitle: "Plus léger = fichier plus petit et montage plus rapide.") {
+                    SettingsMenuButton(
+                        title: qualityTitle(recordMaxHeight),
+                        options: [1080, 1440, 0].map { (qualityTitle($0), $0) },
+                        onSelect: { recordMaxHeight = $0 }
+                    )
+                }
+                SettingsDivider()
                 SettingsRow(title: "Bulle caméra", subtitle: "Votre webcam dans un rond, dans la vidéo. Touche C pendant l’enregistrement.") {
                     SettingsSwitch(isOn: $recordWithCamera)
                 }
             }
+        }
+    }
+
+    private func qualityTitle(_ height: Int) -> String {
+        switch height {
+        case 1080: return "Full HD (1080p)"
+        case 1440: return "QHD (1440p)"
+        default: return "Maximum (4K)"
         }
     }
 

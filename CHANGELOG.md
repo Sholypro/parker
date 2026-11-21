@@ -4,6 +4,9 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.30
+- Nouveau réglage « Qualité vidéo » (Réglages > Capture > Enregistrement vidéo) : Full HD (1080p), QHD (1440p) ou Maximum (4K). Par défaut, 1440p : la vidéo reste nette, le fichier est plus léger et la finalisation du montage bien plus rapide (Mac).
+
 ## 2.29
 - Finalisation de la vidéo plus rapide : l'encodeur matériel du Mac est réglé pour la vitesse, au débit de l'enregistrement d'origine, et la bulle caméra n'est plus calculée sur toute l'image mais seulement sur sa zone. Caméra masquée : la vidéo est copiée sans réencodage, quasi instantané (Mac).
 - Un pourcentage indique l'avancement de la finalisation (Mac).
