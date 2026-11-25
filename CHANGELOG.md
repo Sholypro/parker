@@ -4,6 +4,9 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.34
+- macOS 27 : avec les raccourcis ⌘ + Maj, Parker coupe aussi ⌘⇧6 (Visual Intelligence de Siri) tant qu'il est ouvert, pour que la capture défilante ne se lance plus en même temps. Le raccourci d'Apple revient quand Parker quitte (Mac).
+
 ## 2.33
 - Nouveau raccourci : Maj + ta touche Parker (⌃ ou ⌘) + 2 copie le chemin complet de la dernière capture d'écran, prêt à coller. Aussi dans le menu de Parker (Mac).
 - Même raccourci sur Windows : Ctrl+Maj+2.
