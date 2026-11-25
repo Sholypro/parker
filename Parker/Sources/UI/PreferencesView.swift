@@ -569,6 +569,7 @@ struct ShortcutSettingsPage: View {
         switch action {
         case .allInOne: return "Ouvrir la barre d’outils"
         case .history: return "Historique des captures"
+        case .copyLastPath: return "Copier le chemin de la dernière capture"
         case .captureFullscreen: return "Capturer tout l’écran"
         case .captureArea: return "Capturer une zone"
         case .captureWindow: return "Capturer une fenêtre"

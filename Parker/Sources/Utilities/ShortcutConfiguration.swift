@@ -56,6 +56,7 @@ enum ShortcutModifierProfile: String, CaseIterable, Identifiable {
 enum ShortcutAction: String, CaseIterable, Identifiable {
     case allInOne
     case history
+    case copyLastPath
     case captureFullscreen
     case captureArea
     case captureWindow
@@ -73,6 +74,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
             return "All-in-One Toolbar"
         case .history:
             return "Capture History"
+        case .copyLastPath:
+            return "Copy Last Capture Path"
         case .captureFullscreen:
             return "Capture Fullscreen"
         case .captureArea:
@@ -98,6 +101,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
             return "square.grid.2x2"
         case .history:
             return "clock.arrow.circlepath"
+        case .copyLastPath:
+            return "link"
         case .captureFullscreen:
             return "rectangle.dashed"
         case .captureArea:
@@ -123,6 +128,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
             return .one
         case .history:
             return .h
+        case .copyLastPath:
+            return .two
         case .captureFullscreen:
             return .three
         case .captureArea:
@@ -148,6 +155,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
             return "1"
         case .history:
             return "h"
+        case .copyLastPath:
+            return "2"
         case .captureFullscreen:
             return "3"
         case .captureArea:
@@ -167,7 +176,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         }
     }
 
-    static let quickAccess: [ShortcutAction] = [.allInOne, .history]
+    static let quickAccess: [ShortcutAction] = [.allInOne, .history, .copyLastPath]
     static let capture: [ShortcutAction] = [.captureFullscreen, .captureArea, .captureWindow, .captureScrolling]
     static let recording: [ShortcutAction] = [.recordScreen, .recordArea]
     static let tools: [ShortcutAction] = [.ocr, .colorPicker]

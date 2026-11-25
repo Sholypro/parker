@@ -109,6 +109,7 @@ namespace Parker
             hotkeys.Register(new Hotkeys.Binding { Name = "Capturer une fenêtre", Modifiers = mods, Key = Keys.D5, Action = CaptureWindow });
             hotkeys.Register(new Hotkeys.Binding { Name = "Capture défilante", Modifiers = mods, Key = Keys.D6, Action = CaptureScrolling });
             hotkeys.Register(new Hotkeys.Binding { Name = "Épingler la dernière capture", Modifiers = mods, Key = Keys.D7, Action = PinLast });
+            hotkeys.Register(new Hotkeys.Binding { Name = "Copier le chemin de la dernière capture", Modifiers = mods, Key = Keys.D2, Action = CopyLastPath });
 
             BuildMenu();
             menu.Opening += (s, e) => BuildMenu();
@@ -274,6 +275,21 @@ namespace Parker
             if (last != null) Pin(last); else Toast.Show("Aucune capture à épingler");
         }
 
+        /// <summary>Full path of the newest screenshot in the clipboard (images only).</summary>
+        void CopyLastPath()
+        {
+            var images = new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".pdf" };
+            var last = Settings.Current.Recent.FirstOrDefault(p =>
+                File.Exists(p) && images.Contains(Path.GetExtension(p).ToLowerInvariant()));
+            if (last == null) { Toast.Show("Aucune capture à copier"); return; }
+            try
+            {
+                Clipboard.SetText(last);
+                Toast.Show("Chemin copié : " + Path.GetFileName(last));
+            }
+            catch { Toast.Show("Impossible de copier le chemin"); }
+        }
+
         void Pin(string path) { new PinForm(path).Show(); }
 
         void OpenEditor(string path)
@@ -285,7 +301,7 @@ namespace Parker
 
         void ShowSettings()
         {
-            var keys = "Zone : Ctrl+Maj+4 · Écran : Ctrl+Maj+3 · Fenêtre : Ctrl+Maj+5\nDéfilante : Ctrl+Maj+6 · Épingler : Ctrl+Maj+7";
+            var keys = "Zone : Ctrl+Maj+4 · Écran : Ctrl+Maj+3 · Fenêtre : Ctrl+Maj+5\nDéfilante : Ctrl+Maj+6 · Épingler : Ctrl+Maj+7\nCopier le chemin de la dernière capture : Ctrl+Maj+2";
             using (var f = new SettingsForm(keys)) f.ShowDialog();
         }
 

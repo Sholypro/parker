@@ -53,6 +53,7 @@ class MenuBarController {
 
         // All-in-One shortcut at top
         menu.addItem(makeItem("Tout-en-un", icon: "square.grid.2x2", action: #selector(showAllInOne), shortcutAction: .allInOne))
+        menu.addItem(makeItem("Copier le chemin de la dernière capture", icon: "link", action: #selector(copyLastPath), shortcutAction: .copyLastPath))
         menu.addItem(NSMenuItem.separator())
 
         // Capture section header
@@ -432,6 +433,10 @@ class MenuBarController {
 
     @objc private func showHistory() {
         onShowHistory?()
+    }
+
+    @objc private func copyLastPath() {
+        LastCapturePath.copy()
     }
 
     @objc private func showAllInOne() {

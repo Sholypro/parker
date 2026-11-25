@@ -185,6 +185,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.onHistory = { [weak self] in
             self?.captureHistory.toggle()
         }
+        hotkeyManager.onCopyLastPath = {
+            LastCapturePath.copy()
+        }
         hotkeyManager.registerAll()
         SystemScreenshotShortcuts.sync(with: ShortcutCatalog.currentProfile())
     }

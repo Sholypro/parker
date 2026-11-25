@@ -14,6 +14,7 @@ class HotkeyManager {
     var onColorPicker: (() -> Void)?
     var onAllInOne: (() -> Void)?
     var onHistory: (() -> Void)?
+    var onCopyLastPath: (() -> Void)?
 
     func registerAll() {
         unregisterAll()
@@ -41,6 +42,8 @@ class HotkeyManager {
             return onAllInOne
         case .history:
             return onHistory
+        case .copyLastPath:
+            return onCopyLastPath
         case .captureFullscreen:
             return onCaptureFullscreen
         case .captureArea:

@@ -4,6 +4,10 @@ Une section par version. La section de la version publiée devient le début des
 et le texte affiché dans la fenêtre de mise à jour de l'app.
 Écrire des phrases courtes, une par ligne, commençant par « - », sans gras, titres ni liens.
 
+## 2.33
+- Nouveau raccourci : Maj + ta touche Parker (⌃ ou ⌘) + 2 copie le chemin complet de la dernière capture d'écran, prêt à coller. Aussi dans le menu de Parker (Mac).
+- Même raccourci sur Windows : Ctrl+Maj+2.
+
 ## 2.32
 - Montage : la qualité d'export est désormais 1440p par défaut, cochée dans le menu « Qualité » (Mac).
 - Les choix du menu « Qualité » ne sont plus grisés : si la vidéo enregistrée est plus petite, elle garde simplement sa taille (Mac).
